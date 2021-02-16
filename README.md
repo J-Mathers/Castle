@@ -1,4 +1,4 @@
-Castle - A Python password manager
+<h1>Castle - A Python password manager</h1>
 
 Castle is a simple password manager written entirely in python.
 
@@ -31,60 +31,108 @@ The program itself is capable of storing standard password style data, secure no
 
 
 
-Installation
+<h2>Installation</h2>
 
-Linux
+<h2>Linux</h2>
 
-Debian:-
+<h3>Debian:-</h3>
 
-Ensure you have python 3.8 and pip3 installed on your system
+
+Ensure you have python 3.8 and pip3 installed on your system, if not install with
+'''bash
+sudo apt-get install python3 pip
+'''
+
+Clone the repository
+'''bash
+git clone https://github.com/J-Mathers/Castle.git
+'''
+
+Move into the downloaded directory
+'''bash
+cd ./Castle
+'''
 
 Install tkinter if not present
+'''bash
 sudo apt install python3-tk
+'''
 
 Install xclip and xsel to handle copying passwords to clipboard
+'''bash
 sudo apt install xclip xsel
+'''
 
 Install neeed python packages
+'''bash
 pip3 install -r requirements.txt
+'''
 
 Then simply run the script "castle.py"
+'''bash
+./castle.py
+'''
 
 
 
+<h3>Fedora:</h3>
 
-Fedora:
 
+Ensure you have python 3.8 and pip3 installed on your system, if not install with
+'''bash
+sudo dnf install python3 pip
+'''
 
-Ensure you have python 3.8 and pip3 installed on your system
+Clone the repository
+'''bash
+git clone https://github.com/J-Mathers/Castle.git
+'''
+
+Move into the downloaded directory
+'''bash
+cd ./Castle
+'''
 
 Install tkinter if not present
+'''bash
 sudo dnf install python3-tkinter
+''
 
 Install xclip and xsel to handle copying passwords to clipboard
+'''bash
 sudo dnf install xclip xsel
+'''
 
 Install neeed python packages
+'''bash
 pip install -r requirements.txt
+'''
 
 Then simply run the script "castle.py"
+'''bash
+./castle.py
+'''
 
 
 
 
-Windows
+<h2>Windows</h2>
 
 Install python 3.8 from the Microsoft Store
 
 Make sure this installation included pip by opening a command prompt window and executing
+'''bash
 pip --version
+'''
 
 If this gives a program version pip is installed on your system and you may proceed
 
 Install the latest version of gpg4win from https://www.gpg4win.org/
 
 Install needed python packages - from a command prompt window execute
+'''bash
 pip install -r win-requirements.txt
+'''
 
 Now simply right click the script, select "open with" and chooose python 3.8
 
