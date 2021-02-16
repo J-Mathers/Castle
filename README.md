@@ -20,7 +20,7 @@ Note this will not change the password stored in this file, but it will change t
 
 Beyond this it functions much like any other password manager.
 
-The interface is a simple dashboard style and fairly self explanatory.
+The interface is a simple and intuitive dashboard style.
 
 You can generate passwords from a selection of character sets and easily copy these back and forth between the manager and your applications.
 
