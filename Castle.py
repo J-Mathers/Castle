@@ -2807,6 +2807,13 @@ class Sidebar:
             self.table_button.grid(
                     row=i, column=0, pady=5)
             
+            #Invert button colours for currently viewed table
+            if self.current_table != None:
+                if self.current_table == self.tables_list[i]:
+                    self.table_button.config(bg="white", fg="#187bcd",\
+                                activebackground="white",\
+                                activeforeground="#4e97fe")
+            
             #Store each button in list
             self.table_controls.append(
                     self.table_button)
@@ -2871,7 +2878,7 @@ class Table_Display:
                 row=1, column=1)
         
         self.table_buttons = tkinter.LabelFrame(
-                self.bottom_bar, text="Group Controls", padx=30,\
+                self.bottom_bar, text="Table Controls", padx=30,\
                 pady=12, borderwidth=4, relief=GROOVE, bg="white",\
                 fg="#004aff", font=(
                 "Sans-serif", 10, "bold"))
