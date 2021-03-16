@@ -1,3 +1,3 @@
-xerox
-python-gnupg
 Pywin32
+python-gnupg
+xerox
