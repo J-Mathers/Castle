@@ -1,6 +1,6 @@
 <h1>Castle - A Python password manager</h1>
 
-Castle is a simple password manager written entirely in python.
+Castle is a simple password manager written in python.
 
 
 
@@ -155,7 +155,7 @@ Then simply run the script "castle.py"
 
 <h2>Windows</h2>
 
-Install python 3.8 from the Microsoft Store
+Install python 3.8 or higher from the Microsoft Store
 
 Make sure this installation included pip by opening a command prompt window and executing
 
@@ -164,14 +164,18 @@ Make sure this installation included pip by opening a command prompt window and 
 
 If this gives a program version pip is installed on your system and you may proceed
 
+If not you may have to install pip [using these instructions](https://pip.pypa.io/en/stable/installing/)
+
 Install the latest version of gpg4win from https://www.gpg4win.org/
 
 Install needed python packages - from a command prompt window execute
 
-    pip install -r win-requirements.txt
+    pip install -r <path/to/file>win-requirements.txt
+    e.g.
+    pip install -r C://Users/ThisUser/Documents/win-requirements.txt
 
 
-Now simply right click the script, select "open with" and chooose python 3.8
+Now simply right click the script, select "open with" and chooose python
 
 
 
