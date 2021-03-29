@@ -12,12 +12,15 @@ import os
 import gnupg
 import tkinter
 from tkinter import END, StringVar, IntVar, Toplevel, GROOVE, filedialog
+from tkinter.scrolledtext import ScrolledText
 import xerox
 import string
 import random
 import platform
 import gc
-
+import logging
+from logging.handlers import RotatingFileHandler
+import time
 
 
         
@@ -33,7 +36,11 @@ class Add_Column:
         
         #Define add column window
         self.column_window = tkinter.Toplevel()
-        self.column_window.geometry("420x150")
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            self.column_window.geometry("350x150")
+        else:
+            self.column_window.geometry("420x150")
         self.column_window.title("Castle")
         self.column_window.resizable(0, 0)
         self.column_window.config(bg="white")
@@ -63,7 +70,8 @@ class Add_Column:
 
         #Define text entries and buttons
         self.column_label = tkinter.Label(
-                self.column_window, text="Please enter the name for your new column",\
+                self.column_window, text=\
+                "Please enter the name for your new column",\
                 bg="white", fg="#004aff", font=(
                 "Sans-serif", 12, "bold"))
         
@@ -103,10 +111,17 @@ class Add_Column:
             #Get list of column names to compare against
             self.column_headings = get_column_headings(self.db, self.table_name, 0)
             
-            #Safety check to ensure a name for the new column was given and doesnt conflict with existing column
-            if self.column_name.get() != "" and\
-            self.column_name.get() not in self.column_headings:
+            #Check a name for the new column was given
+            if self.column_name.get() == "":
+                Error_Message(
+                        "Please enter a column name or click 'Cancel'")
             
+            #Check name doesn't conflict with an existing column
+            elif self.column_name.get() in self.column_headings:
+                Error_Message(
+                        "Column names must be unique!")
+            
+            else:
                 #attempt to add new column to table
                 if self.add_column(self.column_name.get()) == 0:
             
@@ -121,41 +136,25 @@ class Add_Column:
                     Error_Message(
                             "column already exists or name not allowed!\n"\
                             + "Try using another name")
-                    
-            #if no name was entered for new column display error message
-            else:
-                Error_Message(
-                        "Please enter a column name or click 'Cancel'")        
+
+                        
         
     def add_column(self, column_name):
-        try:
-            #create cursor to issue commands to database
-            self.c = self.db.cursor()
+        #generate command based on current table and given input
+        self.sql = "ALTER TABLE '{0}' ADD {1} VARCHAR DEFAULT '';".format(
+                self.table_name, ("'" + self.column_name.get() + "'"))
         
-            #generate command based on current table and given input
-            sql = "ALTER TABLE '{0}' ADD {1} VARCHAR DEFAULT '';".format(
-                    self.table_name, ("'" + self.column_name.get() + "'")) 
-        
-            #issue command and commit changes to database so we can use another cursor elsewhere
-            self.c.execute(sql)
-            self.db.commit()
-            return 0
-        #If any errors encountered altering database return 1
-        except:
-            return 1
+        #Attempt to issue command to database, return exit value
+        return issue_command(self.db, self.sql, None)
+            
         
     
     def __del__(self):
-        self.column_label.destroy()
-        self.column_name.destroy()
-        self.submit_button.destroy()
-        self.cancel_button.destroy()
-        self.button_frame.destroy()
-        self.bottom_spacer.destroy()
-        self.button_spacer.destroy()
         try:
-            del self.c
             del self.sql
+            for i in self.column_headings:
+                del i
+            del self.column_headings
         except:
             pass
         self.column_window.destroy()
@@ -174,7 +173,11 @@ class Add_Table:
 
         #Define top level window and widgets
         self.table_window = tkinter.Toplevel()
-        self.table_window.geometry("400x600")
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            self.table_window.geometry("350x600")
+        else:
+            self.table_window.geometry("400x600")
         self.table_window.config(bg="white")
         self.table_window.resizable(0, 0)
 
@@ -249,7 +252,6 @@ class Add_Table:
         
         
         #Define widget for user input
-        
         self.table_title = tkinter.Entry(
                 self.title_frame, width=20, bg="white", font=(
                         "Sans-serif", 10, "bold"))
@@ -362,37 +364,17 @@ class Add_Table:
                
                 #Check there were no issues generating command
                 if self.fields_command != None:
-                    try:
-                        #create cursor object to interact with database
-                        self.c = self.db.cursor()
-        
-                        #Issue generated command to database
-                        self.c.execute(self.fields_command)
-                        self.db.commit()
-            
-                        #Close window and regenerate sidebar controls
+                    #Issue command to database and check for success
+                    if issue_command(self.db, self.fields_command, None) == 0:
+                        
+                        # If successful close window and regenerate sidebar controls
                         self.cancel()
-         
-                    except:
+
+                    else:
                         #If column names conflict sqlite will return an exception
                         Error_Message("Column names must be unique\nPlease check and try again")
         
     def __del__(self):
-
-        self.table_title.destroy()
-        self.password_radio.destroy()
-        self.file_radio.destroy()
-        self.note_radio.destroy()
-        self.card_radio.destroy()
-        self.custom_radio.destroy()
-        self.fields_label.destroy()
-        self.table_fields.destroy()
-        self.ok_button.destroy()
-        self.cancel_button.destroy()
-        self.bottom_frame.destroy()
-        self.top_frame.destroy()
-        self.title_frame.destroy()
-        self.button_frame.destroy()
         try:
             del self.table_style
         except:
@@ -400,7 +382,6 @@ class Add_Table:
         try:
             del self.title
             del self.fields_command
-            del self.c
             del self.fields
         except:
             pass
@@ -436,34 +417,34 @@ class Add_Table:
         #If table style is password
         if table_style == 1:
             fields_command = "CREATE TABLE IF NOT EXISTS '" + self.title \
-                                + "' (id INTEGER PRIMARY KEY NOT NULL, "\
-                                +"Title TEXT NOT NULL, Username TEXT NOT NULL,"\
-                                +"Password TEXT NOT NULL, Url TEXT NOT NULL,"\
-                                +"'Security question' TEXT NOT NULL, "\
-                                +"'Security answer' TEXT NOT NULL);"
+                                + "' (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, "\
+                                +"Title TEXT, Username TEXT,"\
+                                +"Password TEXT, Url TEXT,"\
+                                +"'Security question' TEXT, "\
+                                +"'Security answer' TEXT);"
         
         #If table style is file
         elif table_style == 2:
             fields_command = "CREATE TABLE IF NOT EXISTS '" + self.title + \
-                                  "' (id INTEGER PRIMARY KEY NOT NULL, "\
-                                  +"Title TEXT NOT NULL, File BLOB NOT NULL,"\
-                                  +"Filename TEXT NOT NULL, Comments TEXT NOT NULL);"
+                                  "' (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, "\
+                                  +"Title TEXT, File BLOB,"\
+                                  +"Filename TEXT, Comments TEXT);"
             
         #If table style is secure note
         elif table_style == 3:
             fields_command = "CREATE TABLE IF NOT EXISTS '" + self.title +\
-                                  "' (id INTEGER PRIMARY KEY NOT NULL, "\
-                                  +"Title TEXT NOT NULL, Note TEXT NOT NULL);"
+                                  "' (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, "\
+                                  +"Title TEXT, Note TEXT);"
         
         #If table style is credit card
         elif table_style == 4:
             fields_command = "CREATE TABLE IF NOT EXISTS '" + self.title +\
-                                 "' ('id' INTEGER PRIMARY KEY NOT NULL, "\
-                                 +"'Title' TEXT NOT NULL, 'Cardholder name'"\
-                                 +"TEXT NOT NULL, 'Card type' TEXT NOT NULL,"\
-                                 +"'Card number' TEXT NOT NULL, 'CVV number' "\
-                                 +"TEXT NOT NULL, 'Expiry date' TEXT NOT NULL,"\
-                                 +"'Valid from' TEXT NOT NULL, 'Notes' TEXT NOT NULL);"
+                                 "' ('id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, "\
+                                 +"'Title' TEXT, 'Cardholder name'"\
+                                 +"TEXT, 'Card type' TEXT,"\
+                                 +"'Card number' TEXT, 'CVV number' "\
+                                 +"TEXT, 'Expiry date' TEXT,"\
+                                 +"'Valid from' TEXT, 'Notes' TEXT);"
         
         #If table style is custom
         elif table_style == 5:
@@ -498,7 +479,11 @@ class Confirmation_Message:
     def __init__(self, parent, title_text, ok_text, cancel_text, label_text):
         #Define confirmation popup window
         self.popup = tkinter.Toplevel()
-        self.popup.geometry("375x150")
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            self.popup.geometry("340x150")
+        else:
+            self.popup.geometry("375x150")
         self.popup.title(title_text)
         self.popup.resizable(0, 0)
         self.popup.config(bg="white")
@@ -523,12 +508,21 @@ class Confirmation_Message:
         self.popup_spacer.grid(
                 row=2, column=2)
         
-        #Define warning message
-        self.popup_label = tkinter.Label(
-                self.popup_frame, text=label_text,wraplength=375,\
-                bg="white", fg="#004aff", font=(
-                "Sans-serif", 12, "bold"))
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            #Define warning message
+            self.popup_label = tkinter.Label(
+                    self.popup_frame, text=label_text,wraplength=300,\
+                    bg="white", fg="#004aff", font=(
+                    "Sans-serif", 12, "bold"))
         
+        else:
+            #Define warning message
+            self.popup_label = tkinter.Label(
+                    self.popup_frame, text=label_text,wraplength=375,\
+                    bg="white", fg="#004aff", font=(
+                    "Sans-serif", 12, "bold"))
+            
         self.popup_label.grid(
                 row=1, column=1, columnspan=3)
         
@@ -563,6 +557,347 @@ class Confirmation_Message:
         except:
             pass
     
+
+
+
+class Control_Panel:
+    
+    def __init__(self, display_window, display):
+        self.display = display
+        self.table_style = display.table_style
+        self.db = display.db
+        
+         #define frames used for bottom control panel
+        self.bottom_bar = tkinter.Frame(
+                display_window, width=500,\
+                height=200, bg="white")
+        
+        self.bottom_bar.grid(
+                row=1, column=1)
+        
+        
+        #Create labelframes to hold controls
+        self.table_buttons = tkinter.LabelFrame(
+                self.bottom_bar, text="Table Controls", padx=30,\
+                pady=12, borderwidth=4, relief=GROOVE, bg="white",\
+                fg="#004aff", font=(
+                "Sans-serif", 10, "bold"))
+        
+        self.table_buttons.grid(
+                row=1, column=1)
+        
+        self.entry_buttons = tkinter.LabelFrame(
+                self.bottom_bar, text="Entry Controls", padx=30, pady=10,\
+                borderwidth=4, relief=GROOVE, bg="white", fg="#004aff", font=(
+                "Sans-serif", 10, "bold"))
+        
+        self.entry_buttons.grid(
+                row=2, column=1)
+        
+        #Generate controls based on table style         
+        self.generate_standard_controls()
+        if self.table_style == 3:
+            self.generate_secure_note_controls()
+        elif self.table_style == 4:
+            self.generate_credit_card_controls()
+        elif self.table_style == 1:
+            self.generate_pass_table_controls()
+
+
+
+    def generate_pass_table_controls(self):
+                   
+        #Function to copy selected entry's password
+        def copy_password():
+            try: 
+                xerox.copy(
+                        str(self.display.gpg.decrypt(
+                                self.display.table_data[
+                                        self.display.entry_ref.get()][
+                                                self.display.password_ref],\
+                                        passphrase=self.display.sidebar.parent.crypt_key)).strip(),\
+                                xsel=True)
+            except Exception as e:
+                logger.exception(e)
+            
+            
+        #function to listen for change in show password checkboxes
+        def show_password():
+            self.display.password_entries[
+                    self.display.entry_ref.get()].config(
+                    show=self.show_var.get())
+
+
+        #declare variable for show password box
+        self.show_var = StringVar()
+
+
+        #Generate controls and stick to bottom panel
+        self.copy = tkinter.Button(
+                self.entry_buttons, text="Copy Password",\
+                command=copy_password, anchor="n", fg="white",\
+                bg="#187bcd", activeforeground="white",\
+                activebackground="#4e97fe", width=12)
+        
+        self.copy.grid(
+                row=1, column=2)
+        
+        self.show = tkinter.Checkbutton(
+                self.entry_buttons, text="Show password",\
+                variable=self.show_var, onvalue="", offvalue="*",\
+                command=show_password, bg="white", fg="#004aff",\
+                activebackground="white", activeforeground="#1874CD")
+        
+        self.show.deselect()
+        
+        self.show.grid(
+                row=2, column=2)  
+        
+        
+
+
+    
+
+    def generate_credit_card_controls(self):
+        
+        #functions to copy card and cvv number
+        def card():
+            try:
+                xerox.copy(
+                        str(self.display.gpg.decrypt(
+                                self.display.table_data[
+                                        self.display.entry_ref.get()][
+                                                self.display.card_num_ref],\
+                                        passphrase=self.display.sidebar.parent.crypt_key)).strip(),\
+                                xsel=True)
+            except Exception as e:
+                logger.exception(e)
+        def cvv():
+            try:
+                xerox.copy(
+                        str(self.display.gpg.decrypt(
+                                self.display.table_data[
+                                        self.display.entry_ref.get()][
+                                                self.display.cvv_ref],\
+                                        passphrase=self.display.sidebar.parent.crypt_key)).strip(),\
+                                xsel=True)
+            except Exception as e:
+                logger.exception(e)
+
+        #Functions to listen for changes in show card/cvv boxes
+        def show_card():
+            self.display.card_entries[
+                    self.display.entry_ref.get()].config(
+                    show=self.show_card_var.get())
+
+        
+        def show_cvv():
+            self.display.cvv_entries[
+                    self.display.entry_ref.get()].config(
+                    show=self.show_cvv_var.get())
+
+        #Declare variables for show card/cvv boxes
+        self.show_card_var = StringVar()            
+        self.show_cvv_var = StringVar()
+
+        #Generate controls and stick to bottom panel        
+        self.copy_card = tkinter.Button(
+                self.entry_buttons, text="Copy Card #", command=card,\
+                anchor="n", fg="white", bg="#187bcd",\
+                activeforeground="white", activebackground="#4e97fe",\
+                width=12)
+        
+        self.copy_card.grid(
+                row=1, column=2)
+        
+        
+        self.copy_cvv = tkinter.Button(
+                self.entry_buttons, text="Copy CVV #", command=cvv,\
+                anchor="n", fg="white", bg="#187bcd",\
+                activeforeground="white", activebackground="#4e97fe",\
+                width=12)
+        
+        self.copy_cvv.grid(
+                row=1, column=3)
+        
+        self.show_card = tkinter.Checkbutton(
+                self.entry_buttons, text="Show card number",\
+                variable=self.show_card_var, onvalue="", offvalue="*",\
+                command=show_card, bg="white", fg="#004aff", 
+                activebackground="white", activeforeground="#1874CD")
+        
+        self.show_card.grid(
+                row=2, column=2)
+        
+        self.show_card.deselect()
+                                       
+        self.show_cvv = tkinter.Checkbutton(
+                self.entry_buttons, text="Show cvv Number",\
+                variable=self.show_cvv_var, onvalue="", offvalue="*",\
+                command=show_cvv, bg="white", fg="#004aff",\
+                activebackground="white", activeforeground="#1874CD")
+        
+        self.show_cvv.grid(
+                row=2, column=3)
+        
+        self.show_cvv.deselect()
+
+
+    def generate_secure_note_controls(self):
+        #function for copy password button
+
+        def copy_note():
+            try:
+                xerox.copy(
+                        str(self.display.gpg.decrypt(
+                                self.display.table_data[
+                                        self.display.entry_ref.get()][
+                                                self.display.note_ref],\
+                                        passphrase=self.display.sidebar.parent.crypt_key)).strip(),\
+                                xsel=True)
+            except Exception as e:
+                logger.exception(e)
+
+        
+        #Generate copy note button for each entry
+        self.copy = tkinter.Button(
+                self.entry_buttons, text="Copy Note", command=copy_note,\
+                anchor="n", fg="white", bg="#187bcd",\
+                activeforeground="white", activebackground="#4e97fe",\
+                width=12)
+        
+        self.copy.grid(
+                row=1, column=2)
+
+
+    def generate_standard_controls(self):
+                #Define add entry button
+        self.add_button = tkinter.Button(
+                self.table_buttons, text="Add entry", command=lambda:
+                    Entry_Window(
+                            self.display.column_headings, None, \
+                            None, self.display, self.display.table_style),\
+                            anchor="n", fg="white", bg="#187bcd",\
+                            activeforeground="white",\
+                            activebackground="#4e97fe", width=12)
+                            
+        self.add_button.grid(
+                row=0, column=0)
+
+        #Define add column button
+        self.add_column_button = tkinter.Button(
+                self.table_buttons, text="New column", command=lambda: Add_Column\
+                                                (self.display),\
+                                                anchor="n", fg="white",\
+                                                bg="#187bcd", activeforeground="white",\
+                                                activebackground="#4e97fe", width=12)
+        
+        self.add_column_button.grid(
+                row=0, column=1)
+        
+        #Define delete column button
+        self.delete_column_button = tkinter.Button(
+                self.table_buttons, text="Delete column", command=lambda :
+                    Delete_Column(
+                            self.display.column_headings, self.display.sidebar,\
+                            self.display.table_style),anchor="n",fg="white",\
+                            bg="#187bcd", activeforeground="white",\
+                            activebackground="#4e97fe", width=12)
+        
+        self.delete_column_button.grid(
+                row=0, column=2)
+         
+        #Refresh display
+        self.refresh_button = tkinter.Button(
+                self.table_buttons, text="Refresh", command=lambda:
+                    self.display.refresh(),\
+                            anchor="n", fg="white",\
+                            bg="#187bcd", activeforeground="white",\
+                            activebackground="#4e97fe", width=12)
+        
+        self.refresh_button.grid(
+                row=0, column=3)
+
+        #Define delete entry button
+        self.delete_button = tkinter.Button(
+                self.entry_buttons, text="Delete entry", command=lambda:
+                    self.delete_entry(self.display.entry_ref.get()),\
+                            anchor="n", fg="white", bg="#187bcd",\
+                            activeforeground="white",\
+                            activebackground="#4e97fe", width=12)
+        
+        self.delete_button.grid(
+                row=1, column=0)
+        
+        #Define edit entry button
+        self.edit = tkinter.Button(
+                self.entry_buttons, text="Edit entry", command=lambda:
+                    self.edit_e(
+                            self.display.sidebar),\
+                            anchor="n", fg="white", bg="#187bcd",\
+                            activeforeground="white",\
+                            activebackground="#4e97fe", width=12)
+        
+        self.edit.grid(
+                row=1, column=1)
+            
+        
+    #Function to call edit entry window
+    def edit_e(self, sidebar):
+        #try block in case we are looking at an empty table
+        try:
+            Entry_Window(
+                    self.display.column_headings, self.display.table_data[
+                            self.display.entry_ref.get()],\
+                            self.display.entry_ref.get(), self.display,\
+                            self.display.table_style)
+        except:
+            Error_Message("No entries in this table to edit.")
+            
+            
+          
+    #Function to delete selected entry from current table once user has given confirmation
+    def delete(self, table_name, id_ref):
+        if issue_command(self.db,\
+                    "DELETE FROM '{0}' WHERE id = {1};".format(
+                            table_name, id_ref), None) == 0:
+            
+            #Close popup and refresh display
+            self.display.refresh()
+            
+            self.confirmation.__del__()
+        else:
+            
+            Error_Message(
+                    "Error deleting entry, please try again.")
+        
+        
+    #function to ask user for confirmation then delete a selected entry from the curent table
+    def delete_entry(self, id_ref):
+
+        #Check to ensure there is an entry to delete
+        if id_ref == 0:
+            Error_Message("No entry to delete!")
+        else:
+            #Create confirmation popup to ensure correct entry weas selected
+            self.confirmation = Confirmation_Message(
+                    self,"Delete entry?", "Ok", "Cancel",\
+                    "Are you sure?\nOnce deleted details cannot be retrieved.")
+            
+            self.confirmation.popup_ok.config(
+                    command=lambda: self.delete(
+                            self.display.table_name, id_ref))
+            
+            self.confirmation.popup_cancel.config(
+                    command=self.confirmation.__del__)
+
+    def destroy(self):
+        for widget in self.bottom_bar.winfo_children():
+                widget.destroy()
+        self.bottom_bar.destroy()
+
+
+
                
   
 
@@ -577,7 +912,12 @@ class Create_DB:
         #Define window to get details for new db
         self.create_window = tkinter.Toplevel()
         self.create_window.title("Castle: Create Database")
-        self.create_window.geometry("850x350+200+200")
+        
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            self.create_window.geometry("740x350")
+        else:
+            self.create_window.geometry("850x350")
         self.create_window.resizable(0, 0)
         self.create_window.config(bg="white")
         
@@ -780,14 +1120,12 @@ class Create_DB:
                 
                 #If database file didn't conflict with an existing file proceed and create file
                 if self.db_file_path != None:
-                    
-                    #Connect to new database
-                    self.conn = sqlite3.connect(
-                            self.db_file_path)
-                    self.c = self.conn.cursor()
-                    
+
+                    #Try to create new database file
+                    self.conn = sqlite3.connect(self.db_file_path)
+                
                     #Generate starting tables from user selection
-                    create_tables(self.c, self.db_style.get())
+                    create_tables(self.conn, self.db_style.get())
 
                     #Define charset for random password generation
                     self.charset = "^*$%@#!&.=~+_-"\
@@ -803,7 +1141,7 @@ class Create_DB:
                     self.confirm_pass.delete(0, END)
                     
                     #Insert keyfile password into database
-                    self.c.execute(
+                    issue_command(self.conn,\
                             "INSERT INTO keyfile_pass (pass) VALUES(?)", [
                                     str(self.keyfile_pass)])
                     
@@ -815,16 +1153,14 @@ class Create_DB:
                         
                         #Delete plaintext copy of keyfile
                         shred(self.keyfile_name)  
-                         
-                        #Commit changes
-                        self.conn.commit()
 
                         #Send relevant file paths to main window
                         self.send_to_main(selection_window)
                         
                         #Open display_DB window and close this window
                         selection_window.display = Display_DB(
-                                self.conn, self.master_pass, self.crypt_pass, self.db_file_path, self.gpg, selection_window)
+                                self.conn, self.master_pass, self.crypt_pass,\
+                                self.db_file_path, self.gpg, selection_window)
             
                         self.__del__()   
                     else:
@@ -832,18 +1168,23 @@ class Create_DB:
                         Error_Message(
                                 "Failed to encrypt keyfile")
                         shred(self.db_file_path)
-                       
+            
                     
-        except:
+        except Exception as e:
+            logger.exception(e)
             #If creation fails warn user and attempt to delete any created files
             Error_Message(
-                    "Encountered an error in creation\nPlease try again")
+                    "Encountered an error in creation\nCheck permissions and try again")
             try:
                 shred(self.db_file_path)
             except:
                 pass
             try:
                 shred(self.keyfile_name)
+            except:
+                pass
+            try:
+                shred(self.keyfile_name + ".gpg")
             except:
                 pass
       
@@ -951,14 +1292,13 @@ class Create_DB:
                     self.crypt_pass)
             
         #Encrypt key file and shred original
-        if encrypt(str(
-                self.gpg.decrypt(str(
-                        self.keyfile_pass), passphrase=str(
-                                self.gpg.decrypt(
-                                        self.master_pass,\
-                                        passphrase=self.crypt_pass)))),\
-            keyfile_name, self.gpg) == 0:
-                return keyfile_name
+        if encrypt(
+                str(self.gpg.decrypt(
+                        str(self.keyfile_pass), passphrase=str(self.gpg.decrypt(
+                                self.master_pass, passphrase=self.crypt_pass)))),\
+                        keyfile_name, self.gpg) == 0:
+                    
+                    return keyfile_name
         else:
             #If error occured during encryption delete created file and return None
             shred(keyfile_name)
@@ -977,25 +1317,6 @@ class Create_DB:
                             
         
     def __del__(self):
-        self.db_label.destroy()
-        self.db_loc.destroy()
-        self.db_browse_button.destroy()
-        self.db_name_label.destroy()
-        self.db_name.destroy()
-        self.enter_pass_label.destroy()
-        self.enter_new_pass.destroy()
-        self.confirm_pass_label.destroy()
-        self.confirm_pass.destroy()
-        self.create_now.destroy()
-        self.cancel_button.destroy()
-        self.enter_show.destroy()
-        self.confirm_show.destroy()
-        self.basic.destroy()
-        self.full.destroy()
-        self.create_frame.destroy()
-        self.cancel_frame.destroy()
-        self.spacer_frame.destroy()
-        self.mid_spacer.destroy()
         try:
             del self.db_style
             del self.enter_opt
@@ -1004,11 +1325,8 @@ class Create_DB:
             del self.folder
             del self.db_file_path
             del self.conn
-            del self.c
             del self.charset
             del self.keyfile_name
-
-            
         except:
             pass
         self.create_window.destroy()
@@ -1037,13 +1355,18 @@ class Delete_Column:
         #if the only columns in table are id and one more display error
         if len(column_headings) == 2:
             Error_Message(
-                    "There is only one column left in this table.\nPlease delete the table if this is what you wish.")
+                    "There is only one column left in this table.\n"\
+                    +"Please delete the table if this is what you wish.")
             
         #if there are enough columns to proceed then continue and display window
         else:        
             #Define delete column window
             self.delete_window = tkinter.Toplevel()
-            self.delete_window.geometry("200x500")
+            #Compensate for rendering differences in windows
+            if platform.system() == "Windows":
+                self.delete_window.geometry("173x500")
+            else:
+                self.delete_window.geometry("200x500")
             self.delete_window.config(bg="white")
             self.delete_window.resizable(0, 0)
             self.delete_window.title("Castle")
@@ -1053,8 +1376,13 @@ class Delete_Column:
                     "WM_DELETE_WINDOW", self.__del__)
     
             #Create scrollable frame for window
-            self.scroll_frame  = Scrollable_Frame(
-                    self.delete_window, False, True, 185, 500, 0, 0, 1, 1)
+            #Compensate for rendering differences in windows
+            if platform.system() == "Windows":
+                self.scroll_frame  = Scrollable_Frame(
+                        self.delete_window, False, True, 150, 500, 0, 0, 1, 1)
+            else:
+                self.scroll_frame  = Scrollable_Frame(
+                        self.delete_window, False, True, 185, 500, 0, 0, 1, 1)
             self.scroll_frame.frame.config( bg="white")
             self.scroll_frame.container.config(bg="white")
             self.scroll_frame.canvas.config(bg="white")
@@ -1288,26 +1616,17 @@ class Delete_Column:
                 self.__del__()
             
             #If an error encountered delete temp table and inform user
-            except:
+            except Exception as e:
+                logger.exception(e)
                 try:
                     self.c.execute(
                             "DROP TABLE '" + self.temp_table_name + "';")
                 except:
                     pass
-                #print(e)
                 Error_Message("Error adjusting table, please try again.")
 
 
     def __del__(self):
-        try:
-            self.cancel_button.destroy()
-            for i in range(len(self.buttons)):
-                self.buttons[i].destroy()
-            del self.scroll_frame
-            del self.buttons
-            self.column_list.destroy()
-        except:
-            pass
         try:
             del self.c
             del self.temp_table_name
@@ -1326,10 +1645,7 @@ class Delete_Column:
             del self.confirmation    
         except:
             pass
-        try:
-            self.delete_window.destroy()
-        except:
-            pass
+        self.delete_window.destroy()
           
 
 #class containing window and functionality to select and delete table from DB
@@ -1346,7 +1662,11 @@ class Delete_Table:
 
         #Define window containing list of available groups
         self.delete_window = tkinter.Toplevel()
-        self.delete_window.geometry("200x500")
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            self.delete_window.geometry("170x500")
+        else:
+            self.delete_window.geometry("200x500")
         self.delete_window.config(bg="white")
         self.delete_window.resizable(0, 0)
         self.delete_window.title("Castle")
@@ -1356,8 +1676,13 @@ class Delete_Table:
                 "WM_DELETE_WINDOW", lambda:self.cancel_delete()) 
         
         #Define scrollable frame for delete window
-        self.scroll_frame = Scrollable_Frame(
-                self.delete_window, False, True, 185, 500, 1, 1, 1, 1)
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            self.scroll_frame = Scrollable_Frame(
+                    self.delete_window, False, True, 150, 500, 1, 1, 1, 1)
+        else:
+            self.scroll_frame = Scrollable_Frame(
+                    self.delete_window, False, True, 185, 500, 1, 1, 1, 1)
         self.scroll_frame.frame.config( bg="white")
         self.scroll_frame.container.config(bg="white")
         self.scroll_frame.canvas.config(bg="white")
@@ -1417,24 +1742,17 @@ class Delete_Table:
     def delete_table(self, table_name):
         #generate sql statement for chosen table
         self.sql = "DROP TABLE IF EXISTS '" + table_name + "';"
-        
-        #create cursor object to issue generated command
-        self.c = self.db.cursor()
-        
+                
         #issue drop command to database
-        try:
-            self.c.execute(self.sql)
-        except:
+        if  issue_command(self.db, self.sql, None) != 0:
             Error_Message("Encountered an error!")
         
-        #commit changes
-        self.db.commit()
         #If deleting currently viewed table clear the display
         try:    
             if self.sidebar.current_table == table_name:
                 self.sidebar.table_view.clear_view()
-        except:
-            pass
+        except Exception as e:
+            logger.exception(e)
         
         #close popup window
         self.confirmation.__del__()
@@ -1466,10 +1784,7 @@ class Delete_Table:
             for i in self.delete_functions:
                 del i
             del self.delete_functions
-            for i in self.buttons:
-                i.destroy()
             del self.buttons
-            self.cancel_del_button.destroy()
             self.scroll_frame.__del__()
         except:
             pass
@@ -1487,10 +1802,14 @@ class Display_DB:
     
      
     def __init__(self, db, master_pass, crypt_key, db_path, gpg, parent):
+        #Set flag to indicate database is currently open
+        self.locked = False
+        
         #Save needed objects into attributes for easy referencing
         self.db_file_path = db_path
         self.parent = parent
         self.db = db
+        self.gpg = gpg
         
         #Store crypt key in attribute so we can access it from elsewhere later
         self.crypt_key = crypt_key
@@ -1501,40 +1820,47 @@ class Display_DB:
         self.display_window.title("Castle")
         self.display_window.geometry("1015x700")
         self.display_window.config(bg="white")
+        self.display_window.resizable(0, 0)
 
 
         #Event handler to lock database file if window closed manually 
         self.display_window.protocol(
                 "WM_DELETE_WINDOW", lambda:
-                    self.lock(gpg))        
+                    self.lock())        
         
         #Generate sidebar controls
         self.panel = Sidebar(db, self, gpg)
 
    
-    def lock(self, gpg):
-        #Commit any changes to database that might be outstanding
-        try:
-            self.db.commit()
-        except:
-            pass
-        # Encrypt database file with master password
-        if encrypt(
-                str(gpg.decrypt(
-                        str(self.master_pass), passphrase=self.crypt_key)),\
-                        self.db_file_path, gpg)== 0:
-                    
+    def lock(self):
+        #Check database isn't already locked
+        if self.locked == False:
+            #Commit any changes to database that might be outstanding
             try:
-                #Close connection to database if possible
-                self.db.close()
-            except:
-                pass
-            #If successfully encrypted shred decrypted file
-            shred(self.db_file_path)
-            #Close this window
-            self.__del__()
-        else:
-            Error_Message("Failed to lock database!")
+                self.db.commit()
+            except Exception as e:
+                logger.exception(e)
+
+            # Encrypt database file with master password
+            if encrypt(
+                    str(self.gpg.decrypt(
+                            str(self.master_pass), passphrase=self.crypt_key)),\
+                            self.db_file_path, self.gpg)== 0:
+                        
+                try:
+                    #Close connection to database if possible
+                    self.db.close()
+                except Exception as e:
+                    logger.exception(e)
+
+                #Toggle locked flag
+                self.locked = True
+                #If successfully encrypted shred decrypted file
+                shred(self.db_file_path)
+                #Close this window
+                self.__del__()
+            else:
+                Error_Message("Failed to lock database!")
 
         
     
@@ -1547,11 +1873,8 @@ class Display_DB:
             del self.db_file_path
         except:
             pass
-        try:
-            self.display_window.destroy()
-        except:
-            pass
-
+        self.display_window.destroy()
+        
     
 #Class containing add entry and edit entry windows depending what values are passed
 class Entry_Window:
@@ -1567,21 +1890,14 @@ class Entry_Window:
         self.column_headings = column_headings
         self.table_style = table_style
         self.entry_data = entry_data 
+        self.file_uploaded = False
         
         
         #create dictionary and lists to store generated widgets
         self.entries = {}
-        self.buttons = []
-        self.entry_refs = []
         self.labels = []
         
-        #Declare variables to store column references
-        self.file_ref = None
-        self.title_ref = None
-        self.note_ref = None
-        self.filename_ref = None        
-        
-        
+     
         #Define entry window
         self.entry_window = tkinter.Toplevel()
         self.entry_window.geometry("600x200")
@@ -1640,15 +1956,20 @@ class Entry_Window:
                 self.generate_file_widgets(i)
                
             else:
-                #If not looking at a file storage column create standard widgets and insert decrypted values
+                #Otherwise create standard widgets and insert decrypted values
                 self.generate_standard_widgets(i)
-                self.insert_data(i)
+                
+            #Insert any passed data into generateds widgets
+            if self.entry_data != None and self.entry_data[i] != None:
+                #Skip decrypting file storage column
+                if self.column_headings[i] != "File" or self.table_style != 2:
+                    self.insert_data(i)
           
         #Define submit and cancel buttons for main edit entry window
         self.submit_button = tkinter.Button(
                 self.button_frame, text="Submit", command=lambda:
                     self.submit(
-                            column_headings, table_style),\
+                            column_headings),\
                             fg="white", bg="#187bcd", \
                             activeforeground="white",\
                             activebackground="#4e97fe")
@@ -1664,58 +1985,227 @@ class Entry_Window:
         self.cancel_button.grid(
                 row=1, column=1)
     
-    
-    #function to add/edit row in current table based on users inputs
-    def submit(self, column_headings, table_style):
-                
-        #Flag to check if user has selected a file to store
-        self.file_uploaded = False
         
-        #Check user inputted data into at least one field
-        if self.check_for_input():
-         
-            #If this is a file table
-            if table_style == 2:
-                #Read in data from file
-                self.fields, self.values = self.update_file_entry()
-                            
-            #If not looking at a file table just read in entries  
-            else:
-                self.fields, self.values = self.update_text_entry()
-                    
-            #Sefety check to make sure statement was generated
-            if self.fields!= None and self.values != None:
-                
-                #Generate swl command to add/edit this record
-                self.sql = self.generate_command()
-                
-                try:
-                    #create cursor to issue commands to database
-                    self.c = self.db.cursor()
-                    
-                    #issue command to database and commit changes
-                    self.c.execute(self.sql, self.values)
-                    self.db.commit()
-                    
-                #If an error encountered during database command inform user
-                #and leave window open
-                except:
-                    self.db.commit()
-                    Error_Message("Encountered an error!")
-                    return
-                
+    def submit(self, column_headings):
+        
+        #Scan all entries for user input, build lists as we go
+        self.fields, self.values, self.insert_columns = self.scan_for_input()
+        
+        #As long as user inputted at least one field generate command to insert
+        #or update entry
+        if self.fields != "" and self.values != []:
+            self.sql = self.generate_command(self.fields)    
+        
+            #issue command and check for success
+            if issue_command(self.db, self.sql, self.values) == 0:
                 #Display success message to user
                 self.display_success_message()
                 
-                #Regenerate current table display 
+                #Regenerate current table display ond close window
                 self.table_view.refresh()
-                
-                #call function to close edit entry window and regenerate curent table display
                 self.__del__()
+            #If an error occured issuing command inform user and close
+            #any remaining cursor
+            else:
+                #Display error message
+                self.db.commit()
+                Error_Message("Encountered an error!")
+    
+        
+    def scan_for_input(self):
+        #Declare lists and string to build sql
+        fields = ""
+        insert_columns = []
+        values = []
+        
+        #Bool flag to check for user input
+        user_input = False
+        
+        #loop over entries and check for input
+        for i in range(len(self.column_headings)):
+            #Skip ID column
+            if self.column_headings[i].lower() == "id": 
+                pass
+            
+            #if secure note table and note column heading call read note input function
+            elif self.table_style == 3 and self.column_headings[i] == "Note":
+                if self.entries["Note"].get("1.0", END) != "" or self.id_ref != None:
+                    user_input = True
+                    fields, values, insert_columns = self.read_note_input(
+                            i, fields, values, insert_columns)
+                    
+                        
+            #if filename column of file table
+            elif self.column_headings[i] == "Filename" and self.table_style == 2:
+                if self.entries["Filename"].get() != "":
+                    
+                    #if updating existing record read in data from entry
+                    if self.id_ref != None:
+                        user_input = True
+                        fields, values, insert_columns = self.read_standard_input(
+                                i, fields, values, insert_columns)
+                    
+                    #if adding new record check if file was supplied
+                    else:
+                       
+                        #if file entry is blank return empty lists to halt processing
+                        if self.entries["File"].get() == "":
+                            Error_Message("Please select a file to store!")
+                            return "", [], []
                 
+                        #if file entry not blank read data with standard function 
+                        elif self.entries["File"].get() != "":
+                            user_input = True
+                            fields, values, insert_columns = self.read_standard_input(
+                                    i, fields, values, insert_columns)
+                            
+                        
+                    
+            
+            #if file column  of file table
+            elif self.column_headings[i] == "File" and self.table_style == 2:
+                if self.entries["File"].get() != "":
+                    
+                    ##if user has removed filename and we are creating a new entry
+                    #present warning and halt processing
+                    if self.entries["Filename"].get() == "" and self.id_ref == None:
+                        Error_Message("Please enter a filename!")
+                        return "", [], []
+                    
+                    #Toggle bool flag and read data from file
+                    user_input = True
+                    fields, values, insert_columns = self.read_file_input(
+                            i, fields, values, insert_columns)
+                    
+                    #Check reading file was successful
+                    if fields == "" and values == [] and insert_columns == []:
+                        #If reading file failed return empty lists to halt processing
+                        return "", [], []
+                    
+                    
+
+                    
+            #if any other column read in data
+            else:
+                #If adding new entry only read in filled entries, if editing entry read all
+                if self.entries[self.column_headings[i]].get() != "" or self.id_ref != None:
+                    user_input = True
+                    fields, values, insert_columns = self.read_standard_input(
+                            i, fields, values, insert_columns)
+            
+        #If no errors and there was input in at least one field return gathered data
+        if user_input == True:
+            return fields, values, insert_columns
+        
+        else:
+            #If any errors encountered in collecting input
+            #return empty lists to halt processing
+            Error_Message(
+                    "Encountered an error\nPlease check input and try again.")
+            return "", [], []
+         
+            
+            
+    def read_note_input(self, i, fields, values, insert_columns):
+        #Add this column's heading to fields command
+        fields = fields +"'" + self.column_headings[i] + "'" + " = ?, "
+        #Read in and encrypt value from relevant entry widget
+        if self.entries[self.column_headings[i]].get("1.0", END) != "":
+            values.append(
+                str(self.gpg.encrypt(
+                        self.entries["Note"].get("1.0", END),\
+                        recipients=None,
+                        passphrase=self.sidebar.parent.crypt_key,\
+                        symmetric=cipher.upper(), armor=True)))
+        #If entry is blank
+        else:
+            values.append(None)
+        #Add ccolumn heading to list of columns to update
+        insert_columns.append("Note")
+        #Return collected data
+        return fields, values, insert_columns
+    
+    
+    
+    
+    def read_file_input(self, i, fields, values, insert_columns):
+        #Encrypt and read in file data
+        file_data = self.read_file(self.entries["File"].get())
+        
+        #If error encountered while reading file data return
+        #empty lists to halt processing and inform user
+        if file_data == None:
+            Error_Message(
+                    "Failed to store file!\nPlease try again")
+            
+            return "", [], []
+
+        #Add file column to fields command
+        fields = fields + "'File' = ?, "
+        #Append encrypted file data to values
+        values.append(file_data)
+        #Add column heading to list of columns to update
+        insert_columns.append("File")
+        
+        #Toggle flag to indicate file has been
+        #updated and return gathered data
+        self.file_uploaded = True
+        return fields, values, insert_columns
+        
+        
+        
+        
+    def read_standard_input(self, i, fields, values, insert_columns):
+        #Add this column's heading to fields command
+        fields = fields +"'" + self.column_headings[i] + "'" + " = ?, "
+        #Read in and encrypt value from relevant entry widget
+        if self.entries[self.column_headings[i]].get() != "":            
+            values.append(
+                str(self.gpg.encrypt(
+                        self.entries[self.column_headings[i]].get(),\
+                        recipients=None,\
+                        passphrase=self.sidebar.parent.crypt_key,\
+                        symmetric=cipher.upper(), armor=True)))
+        #If entry is blank
+        else:
+            values.append(None)
+        
+        #Add ccolumn heading to list of columns to update
+        insert_columns.append(self.column_headings[i])
+        #Return collected data
+        return fields, values, insert_columns
+            
+    
+    
+    
+    def generate_command(self, fields):                   
+            #Cut last comma and space off generated statement
+            fields = fields[0:-2]
+            
+            #Check to see if we are updating an
+            #existing record or adding a new one
+            if self.id_ref == None:
+                #if adding new record adjust formatting if only one value supplied
+                if len(self.insert_columns) == 1:
+                    sql = "INSERT INTO '{0}' ('{1}') VALUES (?);".format(
+                            self.table_name, self.insert_columns[0]) 
+                else:
                 
+                    sql = "INSERT INTO '{0}' {1} VALUES ({2});".format(
+                            self.table_name, tuple(self.insert_columns), (
+                                    ", ".join('?'*(len(self.insert_columns))))) 
+            else:
+                #If updating existing entry generate appropriate command
+                sql = "UPDATE '{0}' SET {1} WHERE id = '{2}';".format(
+                        self.table_name, fields, self.id_ref)
+            return sql
+    
+            
+    
                 
-    #Display appropriate success message to user depending what type of transaction
+        
+    #Display appropriate success message to user
+    #depending what type of transaction
     def display_success_message(self):
         if self.file_uploaded == True:
             if self.id_ref == None:
@@ -1727,74 +2217,21 @@ class Entry_Window:
         else:
             Error_Message(
                     "Entry saved")
-
-              
-    
-    def generate_command(self):                   
-        #Cut last comma and space off generated statement
-        self.fields = self.fields[0:-2]
-        
-        #Check to see if we are updating an existing record or adding a new one
-        if self.id_ref == None:
-            #if adding new record adjust formatting if only one value supplied
-            if len(self.column_headings) == 2:
-                sql = "INSERT INTO '{0}' ({1}) VALUES (?);".format(
-                        self.table_name, self.column_headings[1]) 
-            else:
             
-                sql = "INSERT INTO '{0}' {1} VALUES ({2});".format(
-                        self.table_name, tuple(self.column_headings[1:]), (
-                                ", ".join('?'*(len(self.column_headings) - 1)))) 
-        else:
-            #If updating existing entry generate appropriate command
-            sql = "UPDATE '{0}' SET {1} WHERE id = '{2}';".format(
-                    self.table_name, self.fields, self.id_ref)
-        return sql
-
-    
-        
-    def update_text_entry(self):
-        values = []
-        command = ""
-        #Loop over widgets and read in data to be stored
-        for i in range(len(self.entries)):
-            #If current table is a secure note table adjust
-            #how we pick up the data from the text widget  
-            if self.table_style == 3 and i == self.note_ref:
-                values.append(
-                        str(self.gpg.encrypt(
-                                self.entries[i].get("1.0", END),\
-                                recipients=None,
-                                passphrase=self.sidebar.parent.crypt_key,\
-                                symmetric=cipher.upper(), armor=True)))
-            else:
-                values.append(
-                        str(self.gpg.encrypt(
-                                self.entries[i].get(),\
-                                recipients=None,\
-                                passphrase=self.sidebar.parent.crypt_key,\
-                                symmetric=cipher.upper(), armor=True)))
-                
-        #Generate string of fields to be updated on submission
-        for i in range(len(self.column_headings) - 1):
-            command = command + "'" + self.column_headings[i+1] + "'" + " = ?, "
-        return command, values
-
-        
-    def read_file(self, values):
+            
+            
+    def read_file(self, filename):
         #Encrypt file for storage
         if encrypt(
                 self.sidebar.parent.crypt_key,\
-                self.entries[
-                        self.file_ref].get(), self.gpg) == 0:
+                filename, self.gpg) == 0:
             
             #generate filepath to encrypted file
-            filepath = self.entries[
-                    self.file_ref].get() + ".gpg"
+            filepath = filename + ".gpg"
             
             #Read encrypted file into memory
             with open(filepath, "rb") as file:
-                values.append(file.read())
+                data = file.read()
             
             #Delete encrypted copy of file and delete generated filepath
             shred(filepath)
@@ -1802,162 +2239,40 @@ class Entry_Window:
             
             #Set file uploaded flag to True
             self.file_uploaded = True
-            return values
+            return data
+        #If error during encryption return None
         else:
-            #If an error encountered while encrypting file inform user
-            Error_Message(
-                    "Failed to store file!\nPlease try again")
             return None
 
-        
-    def file_inputted(self):
-        values = []
-        command = ""
-        #Loop over columns and append appropriate data to list of values
-        for i in range(len(self.column_headings)):
-            
+    def insert_data(self, i):                        
             #Skip id column
             if self.column_headings[i].lower() == "id":
                 pass
-            
-            #If looking at a file storage column read binary data from file and append to list
-            elif self.column_headings[i].lower() == "file":
-                
-                values = self.read_file(values)
-                    
-            #For any other column append data from entry widget
-            else:
-                #Check no errors occured uploading a file
-                if values == None:
-                    return None, None
-            
-                #Encrypt and append other entered data
-                values.append(
-                        str(self.gpg.encrypt(
-                                self.entries[i-1].get(),\
-                                recipients=None,\
-                                passphrase=self.sidebar.parent.crypt_key,\
-                                symmetric=cipher.upper(), armor=True)))
- 
-        #Generate string of fields to be updated on submission
-        for i in range(len(self.column_headings) - 1):
-            command = command + "'"\
-            + self.column_headings[i+1] + "'" + " = ?, "
-        #return generated command and list of values
-        return command, values
-            
-    
-    
-    def file_not_uploaded(self):    
-        #Declare list to store columns we are going to be updating
-        insert_columns = []
-        values = []
-        command = ""
-        
-        #loop through list of columns that had entries generated and append column heading to insert_columns
-        for i in self.entry_refs:
-            insert_columns.append(self.column_headings[i])
-        
-        #Loop over list of columns to update, generate sql and append data to values list
-        for i in range(len(insert_columns)):
-            command = command + "'" + insert_columns[i] + "'" + " = ?, "
-            values.append(
-                    str(self.gpg.encrypt(
-                            self.entries[
-                                    self.entry_refs[i] - 1].get(),\
-                                    recipients=None, passphrase=self.sidebar.parent.crypt_key,\
-                                    symmetric=cipher.upper(), armor=True)))
-        return command, values
-
-        
-        
-    def update_file_entry(self):
-        #if no updated file was supplied just update the other fields
-        if self.file_entry.get() == "":
-            #Check to make sure filename was not removed as this is needed for retrieval
-            if self.entries[
-                    self.filename_ref].get() == "":
-                Error_Message(
-                        "Please enter a filename")
-            else:
-                command, values = self.file_not_uploaded()
-                return command, values
-         
-        #If an updated file was supplied, overwrite currently stored file
-        else:
-            #Safety checks to ensure we have all the data we need to proceed
-            if self.file_entry.get() == "":
-                Error_Message(
-                        "Please select a file to store")
-            elif self.entries[
-                    self.filename_ref].get() == "":
-                Error_Message(
-                        "Please enter a filename")
-            else:
-                command, values = self.file_inputted()
-                return command, values
-
-
-
-
-    def check_for_input(self):
-        inputted = False
-        #read in data from all entry/text widgets and see if any have data in them
-        for i in range(len(self.entries)):
-            try:
-                if self.entries[i].get().strip() != "":
-                    inputted = True
-            except:
-                if self.entries[i].get("1.0", END).strip() != "":
-                    inputted = True
-        if inputted == True:
-            return True
-        #if all fields were empty display error message and return False
-        else:
-            if self.id_ref == None:
-                Error_Message(
-                        "All fields appear to be empty.\n"\
-                        +"Please enter details to be saved.")
-            else:    
-                Error_Message(
-                        "All fields appear to be empty.\n"\
-                        +"Please delete entry if this is what you wish.")
-            return False
-
-
-    def insert_data(self, i):                        
-            #Insert data from database into generated widget
-            #Safety checks to prevents issues with None values
-            if self.entry_data != None and self.entry_data[i] != None: 
-                    if i - 1 != self.note_ref and self.table_style != 3:
-                        self.entries[i - 1].insert(
-                                0, str(self.gpg.decrypt(
-                                        str(self.entry_data[i]),\
-                                        passphrase=self.sidebar.parent.crypt_key)))
-                    else:
-                        self.entries[i - 1].insert(
-                                END, str(self.gpg.decrypt(
-                                        str(self.entry_data[i]),\
-                                        passphrase=self.sidebar.parent.crypt_key)))
+            else: 
+                #decrypt and insert data for current widget, adjusting if text widget
+                if self.column_headings[i].lower() != "note" and self.table_style != 3:
+                    self.entries[self.column_headings[i]].insert(
+                            0, str(self.gpg.decrypt(
+                                    str(self.entry_data[i]),\
+                                    passphrase=self.sidebar.parent.crypt_key)))
+                else:
+                    self.entries[self.column_headings[i]].insert(
+                            END, str(self.gpg.decrypt(
+                                    str(self.entry_data[i]),\
+                                    passphrase=self.sidebar.parent.crypt_key)))
 
 
 
     def generate_standard_widgets(self, i):
-        #If looking at title column of secure note table save reference
-        if self.column_headings[i].lower() == "title":
-            self.title_ref = i - 1
-        
-        #If looking at filename table of file storage table save column reference
-        if self.column_headings[i].lower() == "filename" and self.table_style == 2:
-            self.filename_ref = i - 1
-        
-        #If looking at note column of secure note table create text widget and save column reference
-        if self.column_headings[i].lower() == "note" and self.table_style == 3:
-            self.note_ref = i - 1
-            self.e = tkinter.Text(
+        #If looking at note column of secure note table
+        #create text widget and save column reference
+        if self.column_headings[i].lower() == "note" and self.table_style == 3:    
+            self.e = ScrolledText(
                     self.side_scroll.frame, width=40, height=5,\
                     bg="white", font=(
                             "Sans-serif", 10, "bold"))
+            self.e.vbar.config(bg="#187bcd",\
+                    activebackground="#4e97fe", troughcolor="white")
         
         else:
             #If none of the columns above, default to an entry widget
@@ -1971,7 +2286,7 @@ class Entry_Window:
         self.e.grid(
                 row=1, column=i, pady=5)
         
-        self.entries[i-1] = self.e
+        self.entries[self.column_headings[i]] = self.e
         
         self.l = tkinter.Label(
                 self.side_scroll.frame, text=self.column_headings[i],\
@@ -1983,12 +2298,9 @@ class Entry_Window:
         
         self.labels.append(self.l)
         
-        self.entry_refs.append(i)
-
 
 
     def generate_file_widgets(self, i):
-        self.file_ref = i - 1
         
         #If we have not been passed an entry ID we are adding a new file
         if self.id_ref == None:
@@ -2013,9 +2325,9 @@ class Entry_Window:
         
         self.file_button = tkinter.Button(
                 self.file_label, text="Browse", command=lambda:
-                    browse(1, self.entries[self.file_ref],\
+                    browse(1, self.entries["File"],\
                            "Select a file to store", ("all files", "*.*"),\
-                           self.entry_window, self.entries[self.filename_ref]),\
+                           self.entry_window, self.entries["Filename"]),\
                            fg="white", bg="#187bcd", activeforeground="white",\
                            activebackground="#4e97fe")
         
@@ -2030,30 +2342,17 @@ class Entry_Window:
         
         self.labels.append(
                 self.file_label)
-        
-        self.buttons.append(
-                self.file_button)
-        
-        self.entries[i-1] = self.file_entry
+
+        #Save this widget into dictionary to reference while building input
+        self.entries[self.column_headings[i]] = self.file_entry
    
 
 
     def __del__(self):
-        self.submit_button.destroy()
-        self.cancel_button.destroy()
+
         try:
-            
-            for i in self.entries.keys():
-                self.entries[i].destroy()
             del self.entries
-            for i in self.labels:
-                i.destroy()
-            for i in self.buttons:
-                i.destroy()
             del self.side_scroll
-            self.button_spacer.destroy()
-            self.button_frame.destroy()
-            self.bottom_spacer.destroy()
         except:
             pass
         try:
@@ -2061,10 +2360,8 @@ class Entry_Window:
             del self.title_ref
             del self.filename_ref
         except:
-            pass
-        
+            pass        
         try:
-            del self.c
             del self.sql
             del self.fields
             for i in self.values:
@@ -2124,6 +2421,8 @@ class Error_Message:
                 row=3, column=2)
         
     def ok(self):
+        for widget in self.warning.winfo_children():
+                widget.destroy()
         self.warning.destroy()
 
 
@@ -2145,7 +2444,12 @@ class Password_Generator:
         
         #Define main generator window
         self.generator_window = tkinter.Toplevel()
-        self.generator_window.geometry("450x500")
+        
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            self.generator_window.geometry("410x500")
+        else:
+            self.generator_window.geometry("450x500")
         self.generator_window.title("Castle: Password Generator")
         self.generator_window.config(bg="white")
         self.generator_window.resizable(0, 0)
@@ -2354,8 +2658,9 @@ class Password_Generator:
             if int(self.length_box.get()) >= self.min and \
             int(self.length_box.get()) <= self.max: 
                 self.length_scale.set(self.length_box.get())
-        except:
-            pass
+        except Exception as e:
+            logger.exception(e)
+            
         
         
         
@@ -2389,29 +2694,12 @@ class Password_Generator:
             #Insert generated password into entry box
             self.password_box.insert(
                     0, self.password)
-        except:
-            pass
-        
+        except Exception as e:
+            logger.exception(e)
+            
+            
     def __del__(self):
-        self.length_box.destroy()
-        self.cancel_button.destroy()
-        self.generate_button.destroy()
-        self.password_box.destroy()
-        self.length_scale.destroy()
-        self.length_box.destroy()
-        self.space_check.destroy()
-        self.bracket_check.destroy()
-        self.special_check.destroy()
-        self.num_check.destroy()
-        self.alpha_check.destroy()
-        self.cancel_spacer.destroy()
-        self.mid_spacer.destroy()
-        self.bottom_spacer.destroy()
-        self.side_spacer.destroy()
-        self.cancel_frame.destroy()
-        self.button_frame.destroy()
-        self.length_frame.destroy()
-        self.charset_frame.destroy()
+
         try:
             del self.password
             del self.charset
@@ -2535,7 +2823,8 @@ class Retrieve_File:
         #Decrypt filename from saved info
         filename = str(
                 self.gpg.decrypt(self.entry_data[self.filename_ref],\
-                passphrase=self.sidebar.parent.crypt_key))
+                passphrase=self.sidebar.parent.crypt_key))+ ".gpg"
+        
         
         #Combine given path and stored filename into full path for destination file
         filepath = os.path.join(
@@ -2559,9 +2848,12 @@ class Retrieve_File:
                         "A file with this name already exists")
             else:
                 #Write encrypted entry to file
-                with open(self.filepath, "wb") as file:
-                    file.write(
-                            entry_data[self.file_ref])
+                try:
+                    with open(self.filepath, "wb") as file:
+                        file.write(
+                                entry_data[self.file_ref])
+                except PermissionError:
+                    Error_Message("Permission Denied!")
                 
                 #Decrypt file
                 decrypt(self.sidebar.parent.crypt_key, self.filepath, self.gpg)
@@ -2596,15 +2888,7 @@ class Retrieve_File:
     
     
     def __del__(self):
-        self.heading_label.destroy()
-        self.path_entry.destroy()
-        self.browse_button.destroy()
-        self.download_button.destroy()
-        self.cancel_button.destroy()
-        self.button_frame.destroy()
-        self.side_spacer.destroy()
-        self.bottom_spacer.destroy()
-        self.button_spacer.destroy()
+
         try:
             del self.file_ref
             del self.filename_ref
@@ -2852,11 +3136,17 @@ class Sidebar:
         self.db = db
         self.gpg = gpg
 
-
-        #Create scrollable frame to use for sidepanel controls
-        self.side_scroll = Scrollable_Frame(
-                parent.display_window, False, True, 180, 700, 0, 0, 2, 1)
-        
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            #Create scrollable frame to use for sidepanel controls
+            self.side_scroll = Scrollable_Frame(
+                    parent.display_window, False, True, 168, 700, 0, 0, 2, 1)
+            
+        else:
+            #Create scrollable frame to use for sidepanel controls
+            self.side_scroll = Scrollable_Frame(
+                    parent.display_window, False, True, 180, 700, 0, 0, 2, 1)
+            
         self.side_scroll.canvas.config(
                 bg="white")
         
@@ -2892,7 +3182,8 @@ class Sidebar:
         self.add_table_button = tkinter.Button(
                 self.control_bar, text="Add table", command=lambda:
                     Add_Table(self), width=10, fg="white",\
-                    bg="#187bcd", activeforeground="white", activebackground="#4e97fe")
+                    bg="#187bcd", activeforeground="white",\
+                    activebackground="#4e97fe")
         
         self.add_table_button.grid(
                 row=1, column=0, pady=5)
@@ -2900,8 +3191,8 @@ class Sidebar:
         #Delete group button
         self.delete_group_button = tkinter.Button(
                 self.control_bar, text="Delete table", command=lambda:
-                    Delete_Table(self), width=10,\
-                    fg="white", bg="#187bcd", activeforeground="white",\
+                    Delete_Table(self), width=10, fg="white", bg="#187bcd",\
+                    activeforeground="white",\
                     activebackground="#4e97fe")
         
         self.delete_group_button.grid(
@@ -2910,8 +3201,8 @@ class Sidebar:
         #Password generator button
         self.password_generator_button = tkinter.Button(
                 self.control_bar, text="Password\nGenerator", command=lambda:
-                    Password_Generator(), width=10, fg="white",\
-                    bg="#187bcd", activeforeground="white",\
+                    Password_Generator(), width=10, fg="white", bg="#187bcd",\
+                    activeforeground="white",\
                     activebackground="#4e97fe")
         
         self.password_generator_button.grid(
@@ -2920,10 +3211,9 @@ class Sidebar:
         #Define update password button
         self.update_pass_button = tkinter.Button(
                 self.control_bar, text="Change\nMaster Pass", command=lambda:
-                    Update_Password(
-                            self),\
-                            width=10, fg="white", bg="#187bcd",\
-                            activeforeground="white", activebackground="#4e97fe")
+                    Update_Password(self), width=10, fg="white",\
+                    bg="#187bcd", activeforeground="white",\
+                    activebackground="#4e97fe")
         
         self.update_pass_button.grid(
                 row=4, column=0, pady=5)
@@ -2931,7 +3221,7 @@ class Sidebar:
         #Define lock button
         self.lock_button = tkinter.Button(
                 self.control_bar, text="Lock", command=lambda:
-                    self.parent.lock(self.gpg), width=10, fg="white",\
+                    self.parent.lock(), width=10, fg="white",\
                     bg="#187bcd", activeforeground="white",\
                     activebackground="#4e97fe")
         
@@ -2940,7 +3230,7 @@ class Sidebar:
         
         
         #Define lists to store controls and functions
-        self.table_controls = []
+        self.table_controls = {}
         self.window_functions = []
         
         #Generate buttons and functions for each table
@@ -2953,21 +3243,22 @@ class Sidebar:
         def f(db, table, x, gpg):
             #Store currently viewed table for refreshing elsewhere
             self.current_table = table    
-            try:
-                #Clear current display, point at selected table and refresh display
-                self.table_view.clear_view()    
-                self.table_view.table_name = table
-                self.table_view.refresh()
-            except:
-                #If no table display exists yet generate new display with selected table
+            
+            #If table_view hasnt been created yet
+            if self.table_view == None:
+                #create new table view
                 self.table_view = Table_Display(
                         table, self)
-            
-            #clear sidepanel buttons 
-            self.clear_buttons()
-            
-            #generate updated sidepanel buttons
-            self.buttons()
+                
+            #if table_view already exists point display at 
+            #selected table and refresh display
+            else:
+                self.table_view.table_name = table
+                self.table_view.refresh()
+                
+            #Update button colours to indicate currently
+            #viewed table
+            self.update_button_colours()
             
         #append generated function to list
         self.window_functions.append(f)
@@ -2999,16 +3290,32 @@ class Sidebar:
                                 activeforeground="#4e97fe")
             
             #Store each button in list
-            self.table_controls.append(
-                    self.table_button)
+            self.table_controls[self.tables_list[i]] = self.table_button
+        
+        
+        
+    def update_button_colours(self):
+        #Loop over current buttons and update colours to indicate currently viewed table
+        for key in self.table_controls:
+            if key == self.current_table:
+                #invert colours
+                self.table_controls[key].config(bg="white", fg="#187bcd",\
+                                activebackground="white",\
+                                activeforeground="#4e97fe")
+            else:
+                #standard colours
+                self.table_controls[key].config(fg="white", bg="#187bcd",\
+                                activeforeground="white",\
+                                activebackground="#4e97fe")
+        
         
         
         
     #Function to destroy sidebar controls so we can create new ones 
     def clear_buttons(self):
         del self.tables_list
-        for i in range(len(self.table_controls)):
-            self.table_controls[i].destroy()
+        for key in self.table_controls:
+            self.table_controls[key].destroy()
         del self.table_controls
         self.add_table_button.destroy()
         self.delete_group_button.destroy()
@@ -3045,18 +3352,13 @@ class Table_Display:
         self.frame.frame.config(bg="white")
         self.frame.canvas.config(bg="white")
 
-        #define frames used for bottom control panel
-        self.bottom_bar = tkinter.Frame(
-                sidebar.parent.display_window, width=500,\
-                height=200, bg="white")
-        
-        self.bottom_bar.grid(
-                row=1, column=1)
-        
+       
         #If any unhandled errors encountered during display generation lock database for safety
         try:
             self.generate_display()
-        except:
+        except Exception as e:
+            logger.error("Fatal error - database locked for safety!")
+            logger.exception(e)
             Error_Message(
                             "Encountered a fatal error!\nLocking database")        
             self.sidebar.parent.lock()
@@ -3084,24 +3386,7 @@ class Table_Display:
         self.file_table = False
         self.table_style = None
         
-        #Create labelframes to hold controls
-        self.table_buttons = tkinter.LabelFrame(
-                self.bottom_bar, text="Table Controls", padx=30,\
-                pady=12, borderwidth=4, relief=GROOVE, bg="white",\
-                fg="#004aff", font=(
-                "Sans-serif", 10, "bold"))
         
-        self.table_buttons.grid(
-                row=1, column=1)
-        
-        self.entry_buttons = tkinter.LabelFrame(
-                self.bottom_bar, text="Entry Controls", padx=30, pady=10,\
-                borderwidth=4, relief=GROOVE, bg="white", fg="#004aff", font=(
-                "Sans-serif", 10, "bold"))
-        
-        self.entry_buttons.grid(
-                row=2, column=1)
-
         #Query database for table headings, 
         self.columns, self.column_headings = get_column_headings(self.db, self.table_name, 1)
 
@@ -3113,26 +3398,20 @@ class Table_Display:
 
         else:                      
             #Extract data from table & check for success
-            self.table_data, self.id_refs = self.get_table_data()
+            self.table_data, self.id_refs = self.get_table_data(self.db)
             
             #If unsuccessful lock database for safety
             if self.table_data == None or self.id_refs == None:
-                    Error_Message(
-                            "Encountered a fatal error!\nLocking database")        
-                    self.sidebar.parent.lock()
+                Error_Message(
+                        "Encountered a fatal error!\nLocking database")        
+                self.sidebar.parent.lock()
             else:
                 #Detect table style    
                 self.table_style = self.detect_table_style()
         
-                #Generate controls based on table style         
-                self.generate_standard_controls()
-                if self.table_style == 3:
-                    self.generate_secure_note_controls()
-                elif self.table_style == 4:
-                    self.generate_credit_card_controls()
-                elif self.table_style == 1:
-                    self.generate_pass_table_controls()
-        
+                #Generate control panel
+                self.control_panel = Control_Panel(self.sidebar.parent.display_window, self)
+                
                 #Generate radio buttons to select each entry in table
                 self.select_buttons = self.generate_selection_controls()
                 
@@ -3149,25 +3428,28 @@ class Table_Display:
                 self.insert_entries()
                 
                 #Delete decrypted entries from memory
-                self.delete_entries()
+                self.delete_decrypted()
 
 
-    def get_table_data(self):
+    def get_table_data(self, db):
         #Define lists to store extracted data and db entry ids
         table_data = {}
         id_refs = [] 
         
-        #Create cursor to issue commands to database
-        c = self.db.cursor()
-        
         try:
+            #Create cursor to issue commands to the database
+            c = db.cursor()
+            
             #Issue command to extract all data for current table
             self.data = c.execute(
                     "SELECT * FROM '{}';".format(self.table_name))
-            #Commit queries to database
-            self.db.commit()
+            
+            #Commit changes so we can open another cursor elsewhere
+            db.commit()
+            
         #If we cannot communicate with database inform user and lock for safety
-        except:
+        except Exception as e:
+            logger.exception(e)
             return None, None
         
         #loop over returned data append each row and it's id to appropriate list
@@ -3180,7 +3462,7 @@ class Table_Display:
 
 
 
-    def delete_entries(self):
+    def delete_decrypted(self):
         #Delete all decrypted entries held in memory
         for key in self.grid_values.keys():
             del self.grid_values[key]
@@ -3218,19 +3500,11 @@ class Table_Display:
                 for key in self.table_data.keys():
                     self.grid_values[
                             "{0},{1}".format(key, i)] = ""
-        
-                    try:
-                        #Spawn process for this entry and add to list
-                        p = Process(
-                                target=decrypt_item, args=(
-                                        bytes(self.table_data[key][i]),\
-                                        i, key, self.grid_values,\
-                                        self.sidebar.parent.crypt_key, self.gpg))
-                        p.start()
-                        procs.append(p)
-                    except:
+                    #Provided there is something to decrypt for this entry
+                    if self.table_data[key][i] != None and self.table_data[key][i] != "":
+            
                         try:
-                            #Adjust process command for text entries
+                            #Spawn process for this entry and add to list
                             p = Process(
                                     target=decrypt_item, args=(
                                             bytes(self.table_data[key][i], "utf-8"),\
@@ -3239,7 +3513,18 @@ class Table_Display:
                             p.start()
                             procs.append(p)
                         except:
-                            pass
+                            try:
+                                #Adjust process command for text entries
+                                p = Process(
+                                        target=decrypt_item, args=(
+                                                bytes(self.table_data[key][i]),\
+                                                i, key, self.grid_values,\
+                                                self.sidebar.parent.crypt_key, self.gpg))
+                                p.start()
+                                procs.append(p)
+                            except Exception as e:
+                                logger.exception(e)
+                                
             
         #Call garbage collector to avoid it being triggered by spawned thread.            
         gc.collect()
@@ -3248,7 +3533,7 @@ class Table_Display:
         for proc in procs:
             proc.join()
     
-
+    #Generate widgets for password column
     def generate_pass_table(self, j):
         e = tkinter.Entry(
                 self.frame.frame, width=18, show="*",\
@@ -3260,6 +3545,7 @@ class Table_Display:
         self.password_entries[self.table_data[j][0]] = e
         return e
     
+    #Generate widgets for credit card columns
     def generate_cc_table(self, i, j):
         e = tkinter.Entry(
                 self.frame.frame, width=18, show="*",\
@@ -3278,15 +3564,19 @@ class Table_Display:
                     self.table_data[j][0]] = e
         return e
     
+    #Generate widgets for secure note column
     def generate_note_table(self):
-        e = tkinter.Text(
+        e = ScrolledText(
             self.frame.frame, height=10, width=40,\
             bg="white", font=(
                     "Sans-serif", 10, "bold"),\
                     highlightbackground="#187bcd",\
                     highlightcolor="#187bcd")
+        e.vbar.config(bg="#187bcd",\
+                    activebackground="#4e97fe", troughcolor="white")
         return e
     
+    #Generate widgets for file column
     def generate_file_table(self, j):
         e = tkinter.Button(
                         self.frame.frame, text="Retrieve file",\
@@ -3317,9 +3607,11 @@ class Table_Display:
                 
                 #Store generated labels in a list
                 self.table_headings.append(l)
+                
             #Loop over entries in table & generate display table
                 for j in self.table_data.keys():
-                    #Generate entries, if looking at a password column use starred out entry instead
+                    
+                    #if looking at a password column use starred out entry instead
                     if self.column_headings[i].lower() == "password" and self.table_style == 1:
                         e = self.generate_pass_table(j)
  
@@ -3335,7 +3627,7 @@ class Table_Display:
                     #Define table layout for file table column
                     elif self.table_style == 2 and self.column_headings[i].lower() == "file":
                         e = self.generate_file_table(j)
-                    #Define standard layout for all other columns
+                    #Define default layout for all other columns
                     else:
                         e = tkinter.Entry(
                                 self.frame.frame, width=18, bg="white", font=(
@@ -3386,238 +3678,7 @@ class Table_Display:
         return select_buttons
 
 
-    def generate_pass_table_controls(self):
-                   
-        #Function to copy selected entry's password
-        def copy_password():
-            try: 
-                xerox.copy(
-                        str(self.gpg.decrypt(
-                                self.table_data[
-                                        self.entry_ref.get()][
-                                                self.password_ref],\
-                                        passphrase=self.sidebar.parent.crypt_key)).strip(),\
-                                xsel=True)
-            except:
-                pass
 
-
-        #function to listen for change in show password checkboxes
-        def show_password():
-            self.password_entries[
-                    self.entry_ref.get()].config(
-                    show=self.show_var.get())
-
-
-        #declare variable for show password box
-        self.show_var = StringVar()
-
-
-        #Generate controls and stick to bottom panel
-        self.copy = tkinter.Button(
-                self.entry_buttons, text="Copy Password",\
-                command=copy_password, anchor="n", fg="white",\
-                bg="#187bcd", activeforeground="white",\
-                activebackground="#4e97fe", width=12)
-        
-        self.copy.grid(
-                row=1, column=2)
-        
-        self.show = tkinter.Checkbutton(
-                self.entry_buttons, text="Show password",\
-                variable=self.show_var, onvalue="", offvalue="*",\
-                command=show_password, bg="white", fg="#004aff",\
-                activebackground="white", activeforeground="#1874CD")
-        
-        self.show.deselect()
-        
-        self.show.grid(
-                row=2, column=2)  
-
-
-    def generate_credit_card_controls(self):
-        
-        #functions to copy card and cvv number
-        def card():
-            try:
-                xerox.copy(
-                        str(self.gpg.decrypt(
-                                self.table_data[
-                                        self.entry_ref.get()][
-                                                self.card_num_ref],\
-                                        passphrase=self.sidebar.parent.crypt_key)).strip(),\
-                                xsel=True)
-            except:
-                pass
- 
-        def cvv():
-            try:
-                xerox.copy(
-                        str(self.gpg.decrypt(
-                                self.table_data[
-                                        self.entry_ref.get()][
-                                                self.cvv_ref],\
-                                        passphrase=self.sidebar.parent.crypt_key)).strip(),\
-                                xsel=True)
-            except:
-                pass
-
-        #Functions to listen for changes in show card/cvv boxes
-        def show_card():
-            self.card_entries[
-                    self.entry_ref.get()].config(
-                    show=self.show_card_var.get())
-
-        
-        def show_cvv():
-            self.cvv_entries[
-                    self.entry_ref.get()].config(
-                    show=self.show_cvv_var.get())
-
-        #Declare variables for show card/cvv boxes
-        self.show_card_var = StringVar()            
-        self.show_cvv_var = StringVar()
-
-        #Generate controls and stick to bottom panel        
-        self.copy_card = tkinter.Button(
-                self.entry_buttons, text="Copy Card #", command=card,\
-                anchor="n", fg="white", bg="#187bcd",\
-                activeforeground="white", activebackground="#4e97fe",\
-                width=12)
-        
-        self.copy_card.grid(
-                row=1, column=2)
-        
-        
-        self.copy_cvv = tkinter.Button(
-                self.entry_buttons, text="Copy CVV #", command=cvv,\
-                anchor="n", fg="white", bg="#187bcd",\
-                activeforeground="white", activebackground="#4e97fe",\
-                width=12)
-        
-        self.copy_cvv.grid(
-                row=1, column=3)
-        
-        self.show_card = tkinter.Checkbutton(
-                self.entry_buttons, text="Show card number",\
-                variable=self.show_card_var, onvalue="", offvalue="*",\
-                command=show_card, bg="white", fg="#004aff", 
-                activebackground="white", activeforeground="#1874CD")
-        
-        self.show_card.grid(
-                row=2, column=2)
-        
-        self.show_card.deselect()
-                                       
-        self.show_cvv = tkinter.Checkbutton(
-                self.entry_buttons, text="Show cvv Number",\
-                variable=self.show_cvv_var, onvalue="", offvalue="*",\
-                command=show_cvv, bg="white", fg="#004aff",\
-                activebackground="white", activeforeground="#1874CD")
-        
-        self.show_cvv.grid(
-                row=2, column=3)
-        
-        self.show_cvv.deselect()
-
-
-    def generate_secure_note_controls(self):
-        #function for copy password button
-
-        def copy_note():
-            try:
-                xerox.copy(
-                        str(self.gpg.decrypt(
-                                self.table_data[
-                                        self.entry_ref.get()][
-                                                self.note_ref],\
-                                        passphrase=self.sidebar.parent.crypt_key)).strip(),\
-                                xsel=True)
-            except:
-                pass
-
-        
-        #Generate copy note button for each entry
-        self.copy = tkinter.Button(
-                self.entry_buttons, text="Copy Note", command=copy_note,\
-                anchor="n", fg="white", bg="#187bcd",\
-                activeforeground="white", activebackground="#4e97fe",\
-                width=12)
-        
-        self.copy.grid(
-                row=1, column=2)
-
-
-    def generate_standard_controls(self):
-                #Define add entry button
-        self.add_button = tkinter.Button(
-                self.table_buttons, text="Add entry", command=lambda:
-                    Entry_Window(
-                            self.column_headings, None, \
-                            None, self, self.table_style),\
-                            anchor="n", fg="white", bg="#187bcd",\
-                            activeforeground="white",\
-                            activebackground="#4e97fe", width=12)
-                            
-        self.add_button.grid(
-                row=0, column=0)
-
-        #Define add column button
-        self.add_column_button = tkinter.Button(
-                self.table_buttons, text="New column", command=lambda: Add_Column\
-                                                (self),\
-                                                anchor="n", fg="white",\
-                                                bg="#187bcd", activeforeground="white",\
-                                                activebackground="#4e97fe", width=12)
-        
-        self.add_column_button.grid(
-                row=0, column=1)
-        
-        #Define delete column button
-        self.delete_column_button = tkinter.Button(
-                self.table_buttons, text="Delete column", command=lambda :
-                    Delete_Column(
-                            self.column_headings, self.sidebar, self.table_style),anchor="n",\
-                            fg="white", bg="#187bcd", activeforeground="white",\
-                            activebackground="#4e97fe", width=12)
-        
-        self.delete_column_button.grid(
-                row=0, column=2)
-         
-        #Refresh display
-        self.refresh_button = tkinter.Button(
-                self.table_buttons, text="Refresh", command=lambda:
-                    self.refresh(),\
-                            anchor="n", fg="white",\
-                            bg="#187bcd", activeforeground="white",\
-                            activebackground="#4e97fe", width=12)
-        
-        self.refresh_button.grid(
-                row=0, column=3)
-
-        #Define delete entry button
-        self.delete_button = tkinter.Button(
-                self.entry_buttons, text="Delete entry", command=lambda:
-                    self.delete_entry(self.entry_ref.get()),\
-                            anchor="n", fg="white", bg="#187bcd",\
-                            activeforeground="white",\
-                            activebackground="#4e97fe", width=12)
-        
-        self.delete_button.grid(
-                row=1, column=0)
-        
-        #Define edit entry button
-        self.edit = tkinter.Button(
-                self.entry_buttons, text="Edit entry", command=lambda:
-                    self.edit_e(
-                            self.sidebar),\
-                            anchor="n", fg="white", bg="#187bcd",\
-                            activeforeground="white",\
-                            activebackground="#4e97fe", width=12)
-        
-        self.edit.grid(
-                row=1, column=1)
-            
 
     def detect_table_style(self):
         #Loop over column headings and detect what style of table we are looking at
@@ -3638,32 +3699,32 @@ class Table_Display:
                 self.password_ref = i
 
         #Check what we've found in the headers and determine table type
+        
+        #If any BLOB columns it's a file table
         if self.file_table == True:
             table_style = 2
+        
+        #If columns for card number and CVV number it's a credit card table
         elif self.card_num_ref != None and self.cvv_ref != None: 
             table_style = 4
+        
+        #If columns for username and password it's a login table
         elif self.username_ref != None and self.password_ref != None:
             table_style = 1
+        
+        #If there's a note column and no other expected columns it's a secure note table
         elif self.note_ref != None and self.cvv_ref == None and\
                     self.file_table == False and\
                     self.username_ref == None and self.password_ref == None:
             table_style = 3
+        
+        #Otherwise treat as a custom table and use defaults
         else:
             table_style = 5
         return table_style
             
 
-    #Function to call edit entry window
-    def edit_e(self, sidebar):
-        #try block in case we are looking at an empty table
-        try:
-            Entry_Window(
-                    self.column_headings, self.table_data[
-                            self.entry_ref.get()],\
-                            self.entry_ref.get(), self,\
-                            self.table_style)
-        except:
-            Error_Message("No entries in this table to edit.")
+
             
 
     #Function to return password/card entry to show="*" state if new entry selected
@@ -3675,66 +3736,23 @@ class Table_Display:
             self.cvv_entries[
                     self.entry_check.get()].config(show="*")
             
-            self.show_card.deselect()
+            self.control_panel.show_card.deselect()
             
-            self.show_cvv.deselect()
+            self.control_panel.show_cvv.deselect()
         except:
             pass
         try:
             self.password_entries[
                     self.entry_check.get()].config(show="*")
             
-            self.show.deselect()
+            self.control_panel.show.deselect()
         except:
             pass
         self.entry_check.set(
                 self.entry_ref.get())
         
         
-     
-    #Function to delete selected entry from current table once user has given confirmation
-    def delete(self, table_name, id_ref):
-        #Create cursor to issue commands to database
-        c = self.db.cursor()
-        try:
-            #Issue command to delete selected entry
-            c.execute(
-                    "DELETE FROM '{0}' WHERE id = {1};".format(
-                            table_name, id_ref))
-            
-            #Commit changes to database to  we can use another cursor elsewhere
-            self.db.commit()
-            
-            #Close popup and refresh display
-            self.refresh()
-            
-            self.confirmation.__del__()
-        except:
-            self.db.commit()
-            
-            Error_Message(
-                    "Error deleting entry, please try again.")
-        
-        
-    #function to ask user for confirmation then delete a selected entry from the curent table
-    def delete_entry(self, id_ref):
-
-        #Check to ensure there is an entry to delete
-        if id_ref == 0:
-            Error_Message("No entry to delete!")
-        else:
-            #Create confirmation popup to ensure correct entry weas selected
-            self.confirmation = Confirmation_Message(
-                    self,"Delete entry?", "Ok", "Cancel",\
-                    "Are you sure?\nOnce deleted details cannot be retrieved.")
-            
-            self.confirmation.popup_ok.config(
-                    command=lambda: self.delete(
-                            self.table_name, id_ref))
-            
-            self.confirmation.popup_cancel.config(
-                    command=self.confirmation.__del__)
-
+   
 
     #Function to refresh current display
     def refresh(self):
@@ -3748,8 +3766,7 @@ class Table_Display:
         try:
             for widget in self.frame.frame.winfo_children():
                 widget.destroy()
-            for widget in self.bottom_bar.winfo_children():
-                widget.destroy()
+            self.control_panel.destroy()
         except:
             pass
 
@@ -3770,6 +3787,10 @@ class Table_Display:
             del self.table_style
         except:
             pass
+        
+        
+        
+        
 
 #Class containing window and functionality to update master pasword and keyfile    
 class Update_Password:
@@ -3783,7 +3804,11 @@ class Update_Password:
         
         #Define window
         self.update_window = tkinter.Toplevel()
-        self.update_window.geometry("600x540")
+        #Compensate for rendering differences in windows
+        if platform.system() == "Windows":
+            self.update_window.geometry("540x540")
+        else:
+            self.update_window.geometry("600x540")
         self.update_window.config(bg="white")
         self.update_window.title("Castle: Update Password")
         self.update_window.resizable=(0, 0)
@@ -4009,93 +4034,142 @@ class Update_Password:
         self.confirm_password.config(
                 show=self.confirm_var.get())
 
-    #Function to update master password with given inputs
-    def update(self):
-        
-        #Safety checks to ensure password was entered and passwords in both boxes match
+    def check_password(self):
+        #Check entered passwords match    
         if self.enter_password.get() != self.confirm_password.get():
             Error_Message(
                     "Entered passwords did not match!")
-        
+            return 1
+        #Check at least one password was supplied
         elif self.enter_password.get().strip() == "":
             Error_Message(
                     "Please enter a new master password!")
-        
-        #If all ok proceed and update password
-        else:
-            #Create cursor to communicate with database
-            self.c = self.db.cursor()
-            
-            #Check to see if user selected option to generate new keyfile
-            if self.update_select.get() == 0:
-                
-                #update master pasword held in memory and encrypt keyfile password with new master pass
-                extracted_key = get_keypass(
-                        self.c, str(
-                                self.gpg.decrypt(
-                                        str(self.sidebar.parent.master_pass),\
-                                        passphrase=self.sidebar.parent.crypt_key))\
-                                , self.gpg)
-                
-                #Encrypt stored password with new master pass and update database
-                self.update_keyfile_pass(extracted_key)
-                
-                #Present success message to user
-                Error_Message(
-                        "Password changed successfully!")    
-                
-                #Close window
-                self.__del__()
-            
-            #if new keyfile to be generated
-            else:
-                if self.generate_new_keyfile() == 0:
-                    #Present success message to user
-                    Error_Message(
-                            "Password changed successfully!")
-     
-                    #Close window
-                    self.__del__()
-  
-    
-    def generate_new_keyfile(self):
-        #Generate path for new file
-        keypath = os.path.join(
-                self.keyfile_path.get(), self.keyfile_name.get()) + ".txt"
-            
+            return 1
+        return 0
+
+
+    def check_keyfile_path(self):
         #Safety checks to ensure we have all the information to proceed
         if self.keyfile_path.get().strip() == "":
             Error_Message(
                     "Please select a location to create new keyfile")
-            return 1
-        
-        elif os.path.isfile(keypath + ".gpg"):
-            Error_Message(
-                    "Chosen file already exists!\nPlease change name or location")
-            return 1
+            return ""
         
         elif self.keyfile_name.get().strip() == "":
             Error_Message(
                     "Please enter a name for your new keyfile")
-            return 1
-        else:
+            return ""
+        
+        #Generate full path to selected file
+        keypath = os.path.join(
+                self.keyfile_path.get(), self.keyfile_name.get()) + ".txt"
+        
+        #Check file exists
+        if os.path.isfile(keypath + ".gpg"):
+            Error_Message(
+                    "Chosen file already exists!\nPlease change name or location")
+            return ""
+        
+        #Check we have access to file
+        try:
+            file = open(keypath, "a")
+            file.close()
+        except PermissionError:
+            Error_Message("Permission denied!")
+            return ""
+        
+        #If all checks passed successfully return path to keyfile
+        return keypath
+        
+        
+        
+        
+
+
+    def password_only(self):
+        #get current keyfile password
+        extracted_key = get_keypass(
+                self.db, str(
+                        self.gpg.decrypt(
+                                str(self.sidebar.parent.master_pass),\
+                                passphrase=self.sidebar.parent.crypt_key))\
+                        , self.gpg)
+
+        #Encrypt keyfile_pass with new master_password
+        updated_key = str(self.gpg.encrypt(
+                extracted_key, recipients=None,\
+                symmetric=cipher.upper(), armor=True,\
+                passphrase=self.enter_password.get()))
+        
+        #Insert re-encrypted keyfile password into table
+        if issue_command(self.db,\
+                "UPDATE 'keyfile_pass' SET 'pass' = ? WHERE id = 1", (
+                        updated_key,)) == 0:
             
+            #If successful update master password held in memory
+            self.sidebar.parent.master_pass = str(self.gpg.encrypt(
+                    self.enter_password.get(), recipients=None,\
+                    passphrase=self.sidebar.parent.crypt_key,\
+                    symmetric=cipher.upper(), armor=True))
+            return 0
+        else:
+            return 1
+
+
+
+    def pass_and_keyfile(self):
+        #Generate path for new file
+        keypath = self.check_keyfile_path()
+        #if any errors with keyfile location halt processing
+        if keypath == "":
+            return
+        else:
             #If all checks passed successfully generate
             #characterset for new keyfile pass
             self.charset = "^*$%@#!&.=~+_-"\
             + string.ascii_letters + string.digits
-            
+
             #Generate new random password to store
             keypass = "".join(random.SystemRandom().choice(self.charset)for i in range (256))
             
-            #Update stored keyfile password in database
-            self.update_keyfile_pass(keypass)
-            
+            ##create and encrypt new keyfile with keypass
             if self.update_keyfile(keypath, keypass) == 0:
-                return 0
+
+                #encrypt keypass for storage in table
+                keypass = str(self.gpg.encrypt(
+                    keypass, recipients=None,\
+                    passphrase=self.enter_password.get(),\
+                    symmetric=cipher.upper(), armor=True))
+                
+                ##update keypass stored in table
+                if issue_command(self.db,\
+                        "UPDATE 'keyfile_pass' SET 'pass' = ? WHERE id = 1", (
+                               keypass ,)) == 0:
+
+                    #if all succsessful update master password held in memory
+                    self.sidebar.parent.master_pass = str(self.gpg.encrypt(
+                            self.enter_password.get(), recipients=None,\
+                            passphrase=self.sidebar.parent.crypt_key,\
+                            symmetric=cipher.upper(), armor=True))
+                    return 0
+                
+                #If updating keypass in database failed halt proceessing
+                else:
+                    return 1
+            
+            #If generating new keyfile failed attempt to delete created file
+            #And halt processing
             else:
+                try:
+                    shred(keypath + ".gpg")
+                except:
+                    pass
                 return 1
             
+            
+        
+
+
             
     def update_keyfile(self, keypath, password):
         #create new keyfile and write crypt_pass
@@ -4108,9 +4182,11 @@ class Update_Password:
             Error_Message(
                     "Failed to create keyfile")
             return 1
+
         else:
             #delete plaintext copy of new keyfile
             shred(keypath)
+
             #Once keyfile generated successfully update main window
             #keyfile_path entry box with new file
             keypath = keypath + ".gpg"
@@ -4120,31 +4196,42 @@ class Update_Password:
             self.selec_keyfile.insert(
                     0, keypath)
 
-            return 0
-
-    
-    
-    def update_keyfile_pass(self, keypass):
-        #Update master password held in memory
-        self.sidebar.parent.master_pass = str(self.gpg.encrypt(
-                self.enter_password.get(), recipients=None,\
-                passphrase=self.sidebar.parent.crypt_key,\
-                symmetric=cipher.upper(), armor=True))
+            return 0    
         
-        #Encrypt keyfile_pass with new master_password
-        updated_key = str(self.gpg.encrypt(
-                keypass, recipients=None,\
-                symmetric=cipher.upper(), armor=True,\
-                passphrase=self.enter_password.get()))
         
-        #Insert re-encrypted keyfile password into table
-        self.c.execute(
-                "UPDATE 'keyfile_pass' SET 'pass' = ? WHERE id = 1", (
-                        updated_key,))
-        #Commit changes to database
-        self.db.commit()
 
-     
+
+    #Function to update master password with given inputs
+    def update(self):
+        
+        #Check password was entered and passwords in both boxes match
+        if self.check_password() == 1:
+            #If no password or didnt match halt processing
+            return
+        
+        #If all ok proceed and update password
+        else:
+            
+            #If user is only updating password
+            if self.update_select.get() == 0:
+                
+                #Attempt to update password and inform user of result and close window
+                if self.password_only() == 0:
+                    Error_Message("Password updated successfully")
+                    self.__del__()
+                    
+                else:
+                    Error_Message("Error updating password!")
+            #If user is updating keyfile as well
+            else:
+                if self.pass_and_keyfile() == 0:
+                    Error_Message("Password updated successfully")
+                    self.__del__()
+                    
+                else:
+                    Error_Message("Error updating password!")
+                
+    
     def __del__(self):
         try:
             del self.charset
@@ -4157,29 +4244,6 @@ class Update_Password:
             del self.extracted_key
         except:
             pass
-        
-        try:
-            self.password_warning.destroy()
-            self.update_warning.destroy()
-            self.enter_label.destroy()
-            self.enter_password.destroy()
-            self.show_password.destroy()
-            self.confirm_label.destroy()
-            self.confirm_password.destroy()
-            self.show_confirm.destroy()
-            self.ok_button.destroy()
-            self.cancel_button.destroy()
-            self.update_key.destroy()
-            self.browse_label.destroy()
-            self.keyfile_path.destroy()
-            self.browse_button.destroy()
-            self.name_label.destroy()
-            self.keyfile_name.destroy()
-            self.button_frame.destroy()
-            self.keyfile_frame.destroy()
-            self.password_frame.destroy()
-        except:
-            pass
         try:
             del self.update_select
             del self.pass_var
@@ -4187,8 +4251,29 @@ class Update_Password:
             self.update_window.destroy()
         except:
             pass
-        
-        
+
+#Portable function to issue and commit commands to database
+def issue_command(db, statement, values):
+    #if passed a list of values issue statement and values
+    if values != None:
+        try:
+            c = db.cursor()
+            c.execute(statement, values)
+            db.commit
+            return 0
+        except Exception as e:
+            logger.exception(e)
+            return 1
+    #if only passed a statement issue the statement
+    else:
+        try:
+            c = db.cursor()
+            c.execute(statement)
+            db.commit
+            return 0
+        except Exception as e:
+            logger.exception(e)
+            return 1  
 
 #Portable file/directory browser function
 def browse(style, output_entry, title, filetype, parent, extra_entry):
@@ -4225,24 +4310,29 @@ def browse(style, output_entry, title, filetype, parent, extra_entry):
 
 #Function to decrypt database file with given master password
 def decrypt(master_pass, filepath, gpg):
-    #Open file
-    file = open(
-            filepath, "rb")
-   
-    #generate path for decrypted file
-    savefile = filepath[0:-4]
-    decrypted_data = gpg.decrypt_file(
-            file, passphrase=master_pass, output=savefile)
-    
-    file.close()
-    
-    #Delete password from memory
-    del master_pass
-    
-#Check file was decrypted successfully
-    if decrypted_data.ok != True:
-        return 1
-    else:
+    try:
+        #Open file
+        file = open(
+                filepath, "rb")
+       
+        #generate path for decrypted file
+        savefile = filepath[0:-4]
+        decrypted_data = gpg.decrypt_file(
+                file, passphrase=master_pass, output=savefile)
+        
+        file.close()
+        
+        #Delete password from memory
+        del master_pass
+        
+    #Check file was decrypted successfully
+        if decrypted_data.ok != True:
+            logger.error("Failed to decrypt file {}".format(filepath))
+            return 1
+        else:
+            return 0
+    except PermissionError:
+        Error_Message("Permission denied!")
         return 0
 
 #Function called to decrypt a single entry from returned table data
@@ -4262,52 +4352,61 @@ def encrypt(master_pass, filepath, gpg):
     savefile = filepath + ".gpg"
 
     #Open file & encrypt
-    file = open(filepath, "rb")        
-    encrypted_data = gpg.encrypt_file(
-            file, None, passphrase=master_pass,\
-            symmetric=cipher.upper(),\
-            output=savefile, armor=False)
-    file.close()
-
-    #Delete master password from memory
-    del master_pass
-
-    #Check encryption was successful
-    if encrypted_data.ok != True:
-        return 1
+    try:
+        file = open(filepath, "rb")        
+        encrypted_data = gpg.encrypt_file(
+                file, None, passphrase=master_pass,\
+                symmetric=cipher.upper(),\
+                output=savefile, armor=False)
+        file.close()
     
-    else:
-        return 0
+        #Delete master password from memory
+        del master_pass
+    
+        #Check encryption was successful
+        if encrypted_data.ok != True:
+            logger.error("Failed to encrypt file {}".format(filepath))
+            return 1
+        
+        else:
+            return 0
+    except PermissionError:
+        Error_Message("Permission denied!")
+        return 1
 
 #Function to return list of table headings
 def get_tables(db):
-    #create cursor to issue commands to database
-    c = db.cursor()
-    
-    #Extract info on what tables are stored
-    tables = c.execute(
-            "SELECT name FROM SQLITE_MASTER WHERE type='table';")
-    
-    #create list, loop over returned data and append to list for use
-    tables_list = []
-    for row in tables:
-        #Skip over "sqlite_sequence" and "keyfile_pass"
-        if row[0] != 'sqlite_sequence' and row[0] != "keyfile_pass":
-            tables_list.append(row[0]) 
-    
-    #Commit changes so we can use another cursor elsewhere
-    db.commit()
-    
-    #Delete data from used variables
-    del tables
-    del c
-    
-    #Sort resulting list in alphabetical order, ignoring case
-    tables_list.sort(
-            key=str.casefold)
-    
-    #return resulting list
-    return tables_list
+    try:
+        #create cursor to issue commands to database
+        c = db.cursor()
+        
+        #Extract info on what tables are stored
+        tables = c.execute(
+                "SELECT name FROM SQLITE_MASTER WHERE type='table';")
+        
+        #create list, loop over returned data and append to list for use
+        tables_list = []
+        for row in tables:
+            #Skip over "sqlite_sequence" and "keyfile_pass"
+            if row[0] != 'sqlite_sequence' and row[0] != "keyfile_pass":
+                tables_list.append(row[0]) 
+        
+        #Commit changes so we can use another cursor elsewhere
+        db.commit()
+        
+        #Delete data from used variables
+        del tables
+        del c
+        
+        #Sort resulting list in alphabetical order, ignoring case
+        tables_list.sort(
+                key=str.casefold)
+        
+        #return resulting list
+        return tables_list
+    except Exception as e:
+        logger.error("Failet to retrieve table information!")
+        logger.exception(e)
 
 
 def check_selection_input(selection_window):
@@ -4352,20 +4451,25 @@ def check_selection_input(selection_window):
 
 #Function to delete files & overwrite any decrypted files
 def shred(filepath):
-    if filepath[-4:] != ".gpg" and platform.system() == "Linux":
-        os.system(
-                "shred '" + filepath + "'")
-        
-    os.unlink(filepath)
+    try:
+        if filepath[-4:] != ".gpg" and platform.system() == "Linux":
+            os.system(
+                    "shred '" + filepath + "'")
+            
+        os.unlink(filepath)
+    except Exception as e:
+        logger.error("Failed to delete file {}".format(filepath))
+        logger.exception(e)
 
 #Popup message if main window is closed by user
 def close_warning(root, main_window, gpg):
     def cancel():
         close_warning.__del__()
+        
     def ok(main_window, gpg):
         #Call lock function in case a database is currently open
         try:
-            main_window.display.lock(gpg)
+            main_window.display.lock()
         except:
             pass
         root.destroy()
@@ -4387,57 +4491,65 @@ def close_warning(root, main_window, gpg):
 #Function to decrypt an encrypted db file and pass the path to the new file along to the display window
 def unlock(gpg, selection_window):
     
+    #Star out password entry in selection window
+    #And deselect "show password" checkbox
+    selection_window.enter_pass.config(show="*")
+    selection_window.show_pass.deselect()
+    
     #If checks passed successfully proceed and connect to database
     if check_selection_input(selection_window) == 0:
         #Read in path to database file
         dbPath = selection_window.db_path.get()
         
-        #Decrypt database file
-        if decrypt(
-                selection_window.enter_pass.get(), dbPath, gpg) == 0:
-            
-            #Connect to database
-            db = sqlite3.connect(
-                    dbPath[0:-4])
-            c = db.cursor()
-            
-            try:
-                #Extract keyfile password from DB
-                extracted_key = get_keypass(c, selection_window.enter_pass.get(), gpg)
-                
-                #Read in location of keyfile
-                keyfile = selection_window.keyfile_path.get()
-                
-                #Attempt to extract crypt_key from keyfile
-                crypt_key = extract_crypt_pass(extracted_key, keyfile, gpg, dbPath)
-                
-                #Read master_pass into memory, encrypt while reading
-                master_pass = gpg.encrypt(
-                    selection_window.enter_pass.get(), recipients=None, passphrase=crypt_key,\
-                    symmetric=cipher.upper(), armor=True)
-                
-                #If successful delete stored keyfile password and open display window
-                if crypt_key != None:
-                    
-                    #Delete variable storing password to keyfile
-                    del extracted_key
-                    
-                    #Create new instance of display_db class and pass through connection to it's window method
-                    selection_window.display = Display_DB(
-                        db, master_pass, crypt_key, selection_window.db_path.get()[0:-4], gpg, selection_window)
-            except:
-                #If we failed to unlock successfully re-encrypt db with
-                #master pass so it's not stuck open
-                encrypt(
-                        selection_window.enter_pass.get(), dbPath, gpg)
+        try:
+            #Decrypt database file
+            if decrypt(
+                    selection_window.enter_pass.get(), dbPath, gpg) != 0:
                 Error_Message(
-                        "Failed to extract keyfile\ndatabase may be corrupted!")
-            
-        else:
-            Error_Message(
-                    "Failed to decrypt database")
-
-
+                        "Failed to decrypt database")
+            else:
+                #Connect to database
+                db = sqlite3.connect(
+                        dbPath[0:-4])
+                
+                try:
+                    #Extract keyfile password from DB
+                    extracted_key = get_keypass(db, selection_window.enter_pass.get(), gpg)
+                    
+                    #Read in location of keyfile
+                    keyfile = selection_window.keyfile_path.get()
+                    
+                    #Attempt to extract crypt_key from keyfile
+                    crypt_key = extract_crypt_pass(extracted_key, keyfile, gpg, dbPath)
+                    
+                    #Read master_pass into memory, encrypt while reading
+                    master_pass = gpg.encrypt(
+                        selection_window.enter_pass.get(), recipients=None, passphrase=crypt_key,\
+                        symmetric=cipher.upper(), armor=True)
+                    
+                    #If successful delete stored keyfile password and open display window
+                    if crypt_key != None:
+                        
+                        #Delete variable storing password to keyfile
+                        del extracted_key
+                        
+                        #Create new instance of display_db class and pass through connection to it's window method
+                        selection_window.display = Display_DB(
+                            db, master_pass, crypt_key, selection_window.db_path.get()[0:-4], gpg, selection_window)
+                except Exception as e:
+                    logger.error("Failed to unlock database")
+                    logger.exception(e)
+                    #If we failed to unlock successfully re-encrypt db with
+                    #master pass so it's not stuck open
+                    encrypt(
+                            selection_window.enter_pass.get(), dbPath, gpg)
+                    Error_Message(
+                            "Failed to extract keyfile\ndatabase may be corrupted!")
+                
+    
+        except PermissionError:
+            Error_Message("Permission denied!")
+    
 
 def get_column_headings(db, table_name, return_data):
     #Extract column headings for table & store in variable
@@ -4448,7 +4560,8 @@ def get_column_headings(db, table_name, return_data):
                         table_name))
      
     #If we cannot communicate with database inform user and lock for safety
-    except:
+    except Exception as e:
+        logger.exception(e)
         return None
         
     #move returned column data into a list to work with 
@@ -4473,136 +4586,156 @@ def get_column_headings(db, table_name, return_data):
         return column_headings
 
 
-def get_keypass(c, master_pass, gpg):
-    keypass = c.execute(
-            "SELECT pass FROM 'keyfile_pass' WHERE id = 1;")
-  
-    #Append returned tuple to list
-    extracted_key = []                
-    for row in keypass:
-        extracted_key.append(row)
-    #change variable to point at password string in returned tuple
-    #and decrypt keyfile pass with master pass from entry widget
-    extracted_key = str(
-            gpg.decrypt(extracted_key[0][0],\
-                        passphrase=master_pass))
-    
-    #Delete variable that held extracted password & decrypted master password
-    del keypass
-    del master_pass
-    return extracted_key
-
+def get_keypass(db, master_pass, gpg):
+    try:    
+        #Create cursor and issue command to database
+        c = db.cursor()
+        keypass = c.execute(
+                "SELECT pass FROM 'keyfile_pass' WHERE id = 1;")
+      
+        #Append returned tuple to list
+        extracted_key = []                
+        for row in keypass:
+            extracted_key.append(row)
+        #change variable to point at password string in returned tuple
+        #and decrypt keyfile pass with master pass from entry widget
+        extracted_key = str(
+                gpg.decrypt(extracted_key[0][0],\
+                            passphrase=master_pass))
+        #Close cursor
+        db.commit()
+        #Delete variable that held extracted password & decrypted master password
+        del keypass
+        del master_pass
+        return extracted_key
+    except Exception as e:
+        logger.error("Failed to extract keypass!")
+        logger.exception(e)
 
 def extract_crypt_pass(extracted_key, keyfile, gpg, dbPath):
     #Extract key from file using password extracted from DB
     #Safety check to ensure keyfile decrypted successfully
-    if decrypt(
-            extracted_key, keyfile, gpg) == 0:
-        with open(
-                keyfile[0:-4], "r") as file:
-            
-            crypt_key = file.read()
-
-        #re-encrypt keyfile
-        if encrypt(
-                extracted_key, keyfile[0:-4], gpg) == 0:
-            
-            #shred encrypted copy of database file and decrypted keyfile
-            shred(dbPath)                       
-            shred(keyfile[0:-4])
-            return crypt_key
-            
-
-        else:
+    try:
+        if decrypt(
+                extracted_key, keyfile, gpg) != 0:
+            #If failed to decrypt keyfile shred decrypted copy of database
+            shred(dbPath[0:-4])
             Error_Message(
-                    "Failed to re-encrypt keyfile,\nplease regenerate keyfile before closing")
-            return crypt_key
+                    "Failed to decrypt keyfile")
+            logger.error("Failed to decrypt keyfile")
+            return None
+        
+        #If decryption was successful read key from file
+        else:
+            with open(
+                    keyfile[0:-4], "r") as file:
+                
+                crypt_key = file.read()
     
-    else:
-        #If we failed to decrypt keyfile shred decrypted copy of database
-        shred(dbPath[0:-4])
-        Error_Message(
-                "Failed to decrypt keyfile")
-        return None
+            #re-encrypt keyfile
+            if encrypt(
+                    extracted_key, keyfile[0:-4], gpg) == 0:
+                
+                #shred encrypted copy of database file and decrypted keyfile
+                shred(dbPath)                       
+                shred(keyfile[0:-4])
+                return crypt_key
+                
+            #If re-encryption of keyfile failed inform user
+            else:
+                Error_Message(
+                        "Failed to re-encrypt keyfile,\nplease regenerate keyfile before closing")
+                logger.error("Failed to re-encrypt keyfile!")
+                return crypt_key
+            
+    except PermissionError:
+        Error_Message("Permission Denied!")
 
 
 
-
-def create_tables(c, db_style):
-    #Create starting tables depending on which option was chosen
-    c.execute(
-            "CREATE TABLE IF NOT EXISTS 'keyfile_pass'"\
-            +"('id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,"\
-            +"'pass' TEXT NOT NULL);")
-    c.execute(
-            "CREATE TABLE IF NOT EXISTS 'Logins' "\
-            +"('id' INTEGER PRIMARY KEY NOT NULL, "\
-            +"'Title' TEXT NOT NULL, 'Username' TEXT NOT NULL,"\
-            +"'Password' TEXT NOT NULL, 'Url' TEXT NOT NULL,"\
-            +"'Security question' TEXT NOT NULL, "\
-            +"'Security answer' TEXT NOT NULL);")
-    c.execute(
-            "CREATE TABLE IF NOT EXISTS 'Files' "\
-            +"('id' INTEGER PRIMARY KEY NOT NULL, "\
-            +"'Title' TEXT NOT NULL, 'File' BLOB NOT NULL, "\
-            +"'Filename' TEXT NOT NULL, 'Comments' TEXT NOT NULL);")
-    c.execute(
-            "CREATE TABLE IF NOT EXISTS 'Secure Notes' "\
-            +"('id' INTEGER PRIMARY KEY NOT NULL, "\
-            +"'Title' TEXT NOT NULL, 'Note' TEXT NOT NULL);")
-    c.execute(
-            "CREATE TABLE IF NOT EXISTS 'Credit Cards' "\
-            +"('id' INTEGER PRIMARY KEY NOT NULL, "\
-            +"'Title' TEXT NOT NULL, 'Cardholder name' "\
-            +"TEXT NOT NULL, 'Card type' TEXT NOT NULL, "\
-            +"'Card number' TEXT NOT NULL, 'CVV number' "\
-            +"TEXT NOT NULL, 'Expiry date' TEXT NOT NULL,"\
-            +"'Valid from' TEXT NOT NULL, 'Notes' TEXT NOT NULL);")
-    if db_style == 2:
+def create_tables(db, db_style):
+    try:
+        #Create cursor to issue commands to database
+        c = db.cursor()
+        #Create starting tables depending on which option was chosen
         c.execute(
-                "CREATE TABLE IF NOT EXISTS 'Work Logins' "\
+                "CREATE TABLE IF NOT EXISTS 'keyfile_pass'"\
+                +"('id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,"\
+                +"'pass' TEXT);")
+        c.execute(
+                "CREATE TABLE IF NOT EXISTS 'Logins' "\
                 +"('id' INTEGER PRIMARY KEY NOT NULL, "\
-                +"'Title' TEXT NOT NULL, 'Username' "\
-                +"TEXT NOT NULL, 'Password' TEXT NOT NULL, "\
-                +"'Url' TEXT NOT NULL, 'Security question' "\
-                +"TEXT NOT NULL, 'Security answer' TEXT NOT NULL);")
+                +"'Title' TEXT, 'Username' TEXT,"\
+                +"'Password' TEXT, 'Url' TEXT,"\
+                +"'Security question' TEXT, "\
+                +"'Security answer' TEXT);")
         c.execute(
-                "CREATE TABLE IF NOT EXISTS 'Identity' "\
+                "CREATE TABLE IF NOT EXISTS 'Files' "\
                 +"('id' INTEGER PRIMARY KEY NOT NULL, "\
-                +"'First Name' TEXT NOT NULL, 'Last Name' "\
-                +"TEXT NOT NULL, 'Initial' TEXT NOT NULL, "\
-                +"'Sex' TEXT NOT NULL, 'DOB' TEXT NOT NULL, "\
-                +"'Occupation' TEXT NOT NULL, 'Address Line1' "\
-                +"TEXT NOT NULL, 'Address Line2' TEXT NOT NULL, "\
-                +"'Postcode' TEXT NOT NULL);")
+                +"'Title' TEXT, 'File' BLOB, "\
+                +"'Filename' TEXT, 'Comments' TEXT);")
         c.execute(
-                "CREATE TABLE IF NOT EXISTS 'Licences' "\
-                +"(id INTEGER PRIMARY KEY NOT NULL, "\
-                +"'Full Name' TEXT NOT NULL, 'Sex' "\
-                +"TEXT NOT NULL, 'Height' TEXT NOT NULL, "\
-                +"'Licence Class' TEXT NOT NULL, 'Restrictions' "\
-                +"TEXT NOT NULL, 'Expiry Date' TEXT NOT NULL, "\
-                +"'Country' TEXT NOT NULL, 'State' TEXT NOT NULL);")
+                "CREATE TABLE IF NOT EXISTS 'Secure Notes' "\
+                +"('id' INTEGER PRIMARY KEY NOT NULL, "\
+                +"'Title' TEXT, 'Note' TEXT);")
         c.execute(
-                "CREATE TABLE IF NOT EXISTS 'Bank Account' "\
-                +"(id INTEGER PRIMARY KEY NOT NULL, "\
-                +"'Bank Name' TEXT NOT NULL, 'Account Name' "\
-                +"TEXT NOT NULL, 'Type' TEXT NOT NULL, "\
-                +"'Account Number' TEXT NOT NULL, "\
-                +"'Sort Code' TEXT NOT NULL, 'PIN' "\
-                +"TEXT NOT NULL, 'Address Line1' TEXT NOT NULL, "\
-                +"'Address Line2' TEXT NOT NULL, "\
-                +"'Branch Phone' TEXT NOT NULL);")
-        c.execute(
-                "CREATE TABLE IF NOT EXISTS 'Passport' "\
-                +"(id INTEGER PRIMARY KEY NOT NULL, 'Type' "\
-                +"TEXT NOT NULL, 'Authority' TEXT NOT NULL, "\
-                +"'Number' TEXT NOT NULL, 'Full Name' "\
-                +"TEXT NOT NULL, 'DOB' TEXT NOT NULL, "\
-                +"'Sex' TEXT NOT NULL, 'Nationality' "\
-                +"TEXT NOT NULL, 'Place of Birth' "\
-                +"TEXT NOT NULL, 'Issued on' TEXT NOT NULL, "\
-                +"'Expiry Date' TEXT NOT NULL);")
+                "CREATE TABLE IF NOT EXISTS 'Credit Cards' "\
+                +"('id' INTEGER PRIMARY KEY NOT NULL, "\
+                +"'Title' TEXT, 'Cardholder name' "\
+                +"TEXT, 'Card type' TEXT, "\
+                +"'Card number' TEXT, 'CVV number' "\
+                +"TEXT, 'Expiry date' TEXT,"\
+                +"'Valid from' TEXT, 'Notes' TEXT);")
+        if db_style == 2:
+            c.execute(
+                    "CREATE TABLE IF NOT EXISTS 'Work Logins' "\
+                    +"('id' INTEGER PRIMARY KEY NOT NULL, "\
+                    +"'Title' TEXT, 'Username' "\
+                    +"TEXT, 'Password' TEXT, "\
+                    +"'Url' TEXT, 'Security question' "\
+                    +"TEXT, 'Security answer' TEXT);")
+            c.execute(
+                    "CREATE TABLE IF NOT EXISTS 'Identity' "\
+                    +"('id' INTEGER PRIMARY KEY NOT NULL, "\
+                    +"'First Name' TEXT, 'Last Name' "\
+                    +"TEXT, 'Initial' TEXT, "\
+                    +"'Sex' TEXT, 'DOB' TEXT, "\
+                    +"'Occupation' TEXT, 'Address Line1' "\
+                    +"TEXT, 'Address Line2' TEXT, "\
+                    +"'Postcode' TEXT);")
+            c.execute(
+                    "CREATE TABLE IF NOT EXISTS 'Licences' "\
+                    +"(id INTEGER PRIMARY KEY NOT NULL, "\
+                    +"'Full Name' TEXT, 'Sex' "\
+                    +"TEXT, 'Height' TEXT, "\
+                    +"'Licence Class' TEXT, 'Restrictions' "\
+                    +"TEXT, 'Expiry Date' TEXT, "\
+                    +"'Country' TEXT, 'State' TEXT);")
+            c.execute(
+                    "CREATE TABLE IF NOT EXISTS 'Bank Account' "\
+                    +"(id INTEGER PRIMARY KEY NOT NULL, "\
+                    +"'Bank Name' TEXT, 'Account Name' "\
+                    +"TEXT, 'Type' TEXT, "\
+                    +"'Account Number' TEXT, "\
+                    +"'Sort Code' TEXT, 'PIN' "\
+                    +"TEXT, 'Address Line1' TEXT, "\
+                    +"'Address Line2' TEXT, "\
+                    +"'Branch Phone' TEXT);")
+            c.execute(
+                    "CREATE TABLE IF NOT EXISTS 'Passport' "\
+                    +"(id INTEGER PRIMARY KEY NOT NULL, 'Type' "\
+                    +"TEXT, 'Authority' TEXT, "\
+                    +"'Number' TEXT, 'Full Name' "\
+                    +"TEXT, 'DOB' TEXT, "\
+                    +"'Sex' TEXT, 'Nationality' "\
+                    +"TEXT, 'Place of Birth' "\
+                    +"TEXT, 'Issued on' TEXT, "\
+                    +"'Expiry Date' TEXT);")
+            #Commit changes to database
+            db.commit()
+    except Exception as e:
+        logger.error("Failed to create starting tables!")
+        logger.exception(e)
 
 
 
@@ -4641,7 +4774,12 @@ def main():
         
     #Configure first window
     root.title("Castle")
-    root.geometry("815x400")
+    
+    #Compensate for rendering differences in windows
+    if platform.system() == "Windows":
+        root.geometry("720x370")
+    else:
+        root.geometry("815x400")
     root.resizable(0, 0)
     root.config(bg="white")
 
@@ -4662,5 +4800,18 @@ def main():
 if __name__ == "__main__":
     #Cipher to use for encryption
     cipher="AES256"
+    
+    
+    #Set and configure logger
+    logger = logging.getLogger()
+    
+
+    
+    handler = RotatingFileHandler(
+            'Castle.log', maxBytes=200000, backupCount=10)
+    logger.addHandler(handler)
+    formatter = logging.Formatter('%(asctime)s %(message)s')
+    formatter.converter = time.gmtime
+    handler.setFormatter(formatter)
     
     main()
