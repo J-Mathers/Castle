@@ -6,28 +6,21 @@ Castle is a simple password manager written in python.
 
 <h2>How it works</h2>
 
-Castle makes use of sqlite3 databases to store your data and gpg symmetric encryption on both the files themcselves and all data stored within the database.
+Castle makes use of sqlite3 databases to store your data and gpg symmetric encryption on both the files and field level.
 
-When a new database is created it also generates a "keyfile" - a text file containing a 256 character password required to decrypt any passwords etc stored in database tables.
-This file is only opened to read the key into memory and then encrypted again.
+When a new database is created it also generates a "keyfile" - an encrypted text file required to decrypt any passwords etc stored in database tables.
 
-The password to open this file is stored in a table of it's own in the database, which is hidden from the user interface, and cannot be retrieved without the master password.
-
-The outcome is a "handshake" style operation needed in order to unlock the database fully. i.e. the master password is needed to unlock the overall database and retrieve the password to the keyfile.
-The keyfile is then opened and if read successfully can then decrypt your stored data.
+Accessing any data stored within your database requires both your master password and this "keyfile".
 
 This creates an opportunity to treat this "keyfile" like a multifactor authentication token. the intention is for the keyfile to be stored separately from the database file (for example on a usb pen).
 
 If for any reason you think your keyfile may have been compromised there is an option to generate a new keyfile when you change your master password.
 
-Note this will not change the password stored in this file, but it will change the password this file is encrypted with so the original will no longer be usable with the program. This means any backups
-you have made of the database or keyfile will no longer be useable with your main files.
-
 The interface is a simple and intuitive dashboard style.
 
-A password genarator is included with selectable charactersets to quickly generate strong passwords and copy them straight to your clipboard.
+A password genarator is included with selectable charactersets to quickly generate strong passwords and copy them directly to your clipboard.
 
-The program itself is capable of storing standard password style data, secure notes for longer messages and will also store files - all fully encrypted for peace of mind.
+The program itself is capable of storing standard password style data, secure notes for longer messages and also files - all fully encrypted for peace of mind.
 
 
 <h2>How to use</h2>
