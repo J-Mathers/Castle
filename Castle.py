@@ -6,21 +6,24 @@ Castle password manager:
 """
 
 
-from multiprocessing import Process, Manager
-import sqlite3
-import os
-import gnupg
-import tkinter
+
+from logging.handlers import RotatingFileHandler
+from multiprocessing import Process, Manager, Queue
 from tkinter import END, StringVar, IntVar, Toplevel, GROOVE, filedialog
 from tkinter.scrolledtext import ScrolledText
-import xerox
-import string
-import random
-import platform
+
+
 import gc
+import gnupg
 import logging
-from logging.handlers import RotatingFileHandler
+import os
+import platform
+import random
+import string
+import sqlite3
+import tkinter
 import time
+import xerox
 
 
         
@@ -1875,6 +1878,7 @@ class Display_DB:
             pass
         self.display_window.destroy()
         
+        
     
 #Class containing add entry and edit entry windows depending what values are passed
 class Entry_Window:
@@ -3433,7 +3437,7 @@ class Table_Display:
 
     def get_table_data(self, db):
         #Define lists to store extracted data and db entry ids
-        table_data = {}
+        table_data = Manager().dict()
         id_refs = [] 
         
         try:
@@ -3485,7 +3489,11 @@ class Table_Display:
         
 
     def decrypt_entries(self):
+        
+        PROCESSES = 10
+        queue = Queue()
         procs = []
+        
         #Loop over grid and spawn a process to decrypt each entry
         for i in range(len(self.column_headings)):
             #Skip Id column
@@ -3496,34 +3504,27 @@ class Table_Display:
                 pass
             
             else:
+                        
                 #For each other cell in table spawn process to decrypt content
                 for key in self.table_data.keys():
                     self.grid_values[
                             "{0},{1}".format(key, i)] = ""
+                    
+                    
                     #Provided there is something to decrypt for this entry
                     if self.table_data[key][i] != None and self.table_data[key][i] != "":
+                        
+                        #Insert grid coordinates to queue
+                        queue.put((key, i))
             
-                        try:
-                            #Spawn process for this entry and add to list
-                            p = Process(
-                                    target=decrypt_item, args=(
-                                            bytes(self.table_data[key][i], "utf-8"),\
-                                            i, key, self.grid_values,\
-                                            self.sidebar.parent.crypt_key, self.gpg))
-                            p.start()
-                            procs.append(p)
-                        except:
-                            try:
-                                #Adjust process command for text entries
-                                p = Process(
-                                        target=decrypt_item, args=(
-                                                bytes(self.table_data[key][i]),\
-                                                i, key, self.grid_values,\
-                                                self.sidebar.parent.crypt_key, self.gpg))
-                                p.start()
-                                procs.append(p)
-                            except Exception as e:
-                                logger.exception(e)
+            
+        for i in range(PROCESSES):
+            #Spawn processes, passing manager dict to store decrypted values, encryption key and gpg
+            p = Process(target=decrypt_item, args=(queue, self.grid_values,\
+                                            self.sidebar.parent.crypt_key, self.gpg, self.table_data))
+            p.start()
+            procs.append(p)
+            
                                 
             
         #Call garbage collector to avoid it being triggered by spawned thread.            
@@ -4335,13 +4336,22 @@ def decrypt(master_pass, filepath, gpg):
         Error_Message("Permission denied!")
         return 0
 
-#Function called to decrypt a single entry from returned table data
-def decrypt_item(data, i, j, dictionary, crypt_key, gpg):
-    dictionary[
-            "{0},{1}".format(j, i)] += str(
-            gpg.decrypt(
-                    data, passphrase=crypt_key))
 
+
+                
+#Function called to decrypt a entries from returned table data
+def decrypt_item(queue, grid_values, crypt_key, gpg, table_data):
+    #Get coordinates for next entry to decrypt from queue
+    while not queue.empty():
+        coords = queue.get()
+        #Decrypt entry for this set of coordinates and insert results into decrypted manager dict
+        grid_values[
+                "{0},{1}".format(coords[0], coords[1])] += str(
+                gpg.decrypt(
+                        table_data[coords[0]][coords[1]], passphrase=crypt_key))
+                    
+                
+                
 #Function to encrypt database with provided master password
 def encrypt(master_pass, filepath, gpg):
     #Check passed file paths and adjust as needed
